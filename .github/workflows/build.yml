@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache
+          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache device-tree-compiler systemd-ukify systemd-boot-efi
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -48,6 +48,26 @@ jobs:
 
       - name: Build DTBs
         run: make ARCH=arm64 -j"$(nproc)" dtbs
+
+      - name: Build UKIs
+        run: |
+          set -euo pipefail
+          DTS=arch/arm64/boot/dts/qcom
+          mkdir -p out
+          for spec in china:cn global:gl; do
+            src="${spec%%:*}"
+            tag="${spec##*:}"
+            fdtoverlay -i "$DTS/kaanapali-oneplus-infiniti-common.dtb" \
+              -o "out/kaanapali-$tag.dtb" \
+              "$DTS/kaanapali-oneplus-infiniti-$src.dtbo"
+            ukify build \
+              --linux=arch/arm64/boot/Image \
+              --devicetree="out/kaanapali-$tag.dtb" \
+              --cmdline='console=tty0 loglevel=8' \
+              --uname="$(cat include/config/kernel.release)" \
+              --output="out/kaanapali-$tag.efi"
+          done
+          ls -la out/*.efi
 
       - name: Package
         run: |
@@ -82,6 +102,10 @@ jobs:
           overwrite_files: true
           body: |
             Rolling build of branch `7.2` for OnePlus 15 (kaanapali).
-            Image + DTBs + .config + BUILD_INFO.txt inside the tarball.
+            Image + DTBs + UKIs + .config + BUILD_INFO.txt inside the tarball.
+            `kaanapali-cn.efi` / `kaanapali-gl.efi`: bootable UKIs for `fastboot boot`.
             Last commit: ${{ github.sha }}
-          files: kaanapali-7.2-build.tar.gz
+          files: |
+            kaanapali-7.2-build.tar.gz
+            out/kaanapali-cn.efi
+            out/kaanapali-gl.efi
