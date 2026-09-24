@@ -8,10 +8,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,7 +27,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flex bison libssl-dev libelf-dev bc
+          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.arch }}-
 
       - name: Configure
         run: |
@@ -28,7 +44,7 @@ jobs:
           make ARCH=arm64 olddefconfig
 
       - name: Build Image
-        run: make ARCH=arm64 -j"$(nproc)" Image
+        run: make ARCH=arm64 -j"$(nproc)" CC="ccache gcc" Image
 
       - name: Build DTBs
         run: make ARCH=arm64 -j"$(nproc)" dtbs
@@ -45,6 +61,7 @@ jobs:
             echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "date: $(date -u +%FT%TZ)"
             echo "runner: $RUNNER_ARCH"
+            echo "ccache: $(CCACHE_DIR=$CCACHE_DIR ccache -s 2>/dev/null | grep -E 'cache hit|Cache size' || true)"
           } > out/BUILD_INFO.txt
           tar -C out -czf kaanapali-7.2-build.tar.gz .
           ls -la out/ kaanapali-7.2-build.tar.gz
