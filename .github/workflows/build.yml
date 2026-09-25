@@ -63,7 +63,7 @@ jobs:
             ukify build \
               --linux=arch/arm64/boot/Image \
               --devicetree="out/kaanapali-$tag.dtb" \
-              --cmdline='console=tty0 loglevel=8' \
+              --cmdline='root=PARTUUID=4B3A4040-F3F4-411C-B61B-D9783E4A9E25 earlycon console=tty0 loglevel=8 log_buf_len=16M panic=5 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000 ramoops.mem_address=0xB8000000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000 ramoops.console_size=0x200000 ramoops.max_reason=4' \
               --uname="$(cat include/config/kernel.release)" \
               --output="out/kaanapali-$tag.efi"
           done
