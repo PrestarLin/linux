@@ -102,10 +102,12 @@ jobs:
           overwrite_files: true
           body: |
             Rolling build of branch `7.2` for OnePlus 15 (kaanapali).
-            Image + DTBs + UKIs + .config + BUILD_INFO.txt inside the tarball.
+            Every build output is attached as an individual file: Image,
+            kaanapali-cn/gl.dtb, the kaanapali*.dtb/.dtbo set, UKIs,
+            config and BUILD_INFO.txt - with the same files also bundled
+            in kaanapali-7.2-build.tar.gz.
             `kaanapali-cn.efi` / `kaanapali-gl.efi`: bootable UKIs for `fastboot boot`.
             Last commit: ${{ github.sha }}
           files: |
             kaanapali-7.2-build.tar.gz
-            out/kaanapali-cn.efi
-            out/kaanapali-gl.efi
+            out/*
