@@ -69,6 +69,7 @@ struct ipa_smp2p;
  * @modem_state:	State of modem (stopped, running)
  * @modem_netdev:	Network device structure used for modem
  * @qmi:		QMI information
+ * @fnr_idx_start:	First FnR counter index used by the modem
  * @fnr_idx_cnt:	Number of FnR counters
  */
 struct ipa {
@@ -131,6 +132,7 @@ struct ipa {
 	struct net_device *modem_netdev;
 	struct ipa_qmi qmi;
 
+	u8 fnr_idx_start;
 	u8 fnr_idx_cnt;
 };
 

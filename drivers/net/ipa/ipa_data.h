@@ -181,6 +181,7 @@ struct ipa_resource_data {
  * @imem_addr:		physical address of IPA region within IMEM
  * @imem_size:		size in bytes of IPA IMEM region
  * @smem_size:		size in bytes of the IPA SMEM region
+ * @fnr_idx_start:	First FnR counter index used by the modem (default 128)
  * @fnr_idx_cnt:	Number of FnR counters
  */
 struct ipa_mem_data {
@@ -195,6 +196,7 @@ struct ipa_mem_data {
 
 	u32 smem_size;
 
+	u8 fnr_idx_start;
 	u8 fnr_idx_cnt;
 };
 
@@ -258,5 +260,6 @@ extern const struct ipa_data ipa_data_v4_11;
 extern const struct ipa_data ipa_data_v5_0;
 extern const struct ipa_data ipa_data_v5_2;
 extern const struct ipa_data ipa_data_v5_5;
+extern const struct ipa_data ipa_data_v5_5_kaanapali;
 
 #endif /* _IPA_DATA_H_ */
