@@ -42,6 +42,14 @@
 
 		stdout-path = "serial0:115200n8";
 
+	/* ABL-style handoffs (e.g. SfbKernelBoot) patch the command line and
+	 * initrd range into chosen in place; they abort when these properties
+	 * are missing. The blank 1 KB window becomes an empty command line on
+	 * paths that do not rewrite it. */
+	bootargs = "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                ";
+	linux,initrd-start = <0x0 0x0>;
+	linux,initrd-end = <0x0 0x0>;
+
 		framebuffer: framebuffer@b8000000 {
 			compatible = "simple-framebuffer";
 			reg = <0x0 0xfc800000 0x0 0x2b00000>;
