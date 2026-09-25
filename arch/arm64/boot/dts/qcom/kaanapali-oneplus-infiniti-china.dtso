@@ -23,7 +23,7 @@
 	status = "okay";
 
 	panel@0 {
-		compatible = "mdss,ad296-p-3-a0020-dsc";
+		compatible = "mdss,ad296-p-3-a0020-dsc", "oneplus,ad296-a0020";
 		reg = <0>;
 
 		pinctrl-0 = <&sde_dsi_active &sde_te_active &sde_esync0_suspend
