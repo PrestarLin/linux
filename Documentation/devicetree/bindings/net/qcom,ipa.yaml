@@ -44,6 +44,7 @@ properties:
   compatible:
     oneOf:
       - enum:
+          - qcom,kaanapali-ipa
           - qcom,milos-ipa
           - qcom,msm8998-ipa
           - qcom,sc7180-ipa
