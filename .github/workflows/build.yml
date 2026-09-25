@@ -1,0 +1,113 @@
+name: build
+
+on:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache device-tree-compiler systemd-ukify systemd-boot-efi
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.arch }}-
+
+      - name: Configure
+        run: |
+          make ARCH=arm64 defconfig
+          ./scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/kaanapali.config
+          make ARCH=arm64 olddefconfig
+
+      - name: Build Image
+        run: make ARCH=arm64 -j"$(nproc)" CC="ccache gcc" Image
+
+      - name: Build DTBs
+        run: make ARCH=arm64 -j"$(nproc)" dtbs
+
+      - name: Build UKIs
+        run: |
+          set -euo pipefail
+          DTS=arch/arm64/boot/dts/qcom
+          mkdir -p out
+          for spec in china:cn global:gl; do
+            src="${spec%%:*}"
+            tag="${spec##*:}"
+            fdtoverlay -i "$DTS/kaanapali-oneplus-infiniti-common.dtb" \
+              -o "out/kaanapali-$tag.dtb" \
+              "$DTS/kaanapali-oneplus-infiniti-$src.dtbo"
+            ukify build \
+              --linux=arch/arm64/boot/Image \
+              --devicetree="out/kaanapali-$tag.dtb" \
+              --cmdline='console=tty0 loglevel=8' \
+              --uname="$(cat include/config/kernel.release)" \
+              --output="out/kaanapali-$tag.efi"
+          done
+          ls -la out/*.efi
+
+      - name: Package
+        run: |
+          mkdir -p out
+          cp arch/arm64/boot/Image out/
+          cp .config out/config
+          find arch/arm64/boot/dts/qcom -maxdepth 1 -name 'kaanapali-oneplus-infiniti*' \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp -v {} out/ \;
+          {
+            echo "commit: $GITHUB_SHA"
+            echo "branch: $GITHUB_REF_NAME"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "date: $(date -u +%FT%TZ)"
+            echo "runner: $RUNNER_ARCH"
+            echo "ccache: $(CCACHE_DIR=$CCACHE_DIR ccache -s 2>/dev/null | grep -E 'cache hit|Cache size' || true)"
+          } > out/BUILD_INFO.txt
+          tar -C out -czf kaanapali-master-build.tar.gz .
+          ls -la out/ kaanapali-master-build.tar.gz
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaanapali-master
+          path: out/
+          retention-days: 30
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: master-latest
+          name: "kaanapali master latest"
+          prerelease: true
+          overwrite_files: true
+          body: |
+            Rolling build of branch `master` for OnePlus 15 (kaanapali).
+            Every build output is attached as an individual file: Image,
+            kaanapali-cn/gl.dtb, the kaanapali*.dtb/.dtbo set, UKIs,
+            config and BUILD_INFO.txt - with the same files also bundled
+            in kaanapali-master-build.tar.gz.
+            `kaanapali-cn.efi` / `kaanapali-gl.efi`: bootable UKIs for `fastboot boot`.
+            Last commit: ${{ github.sha }}
+          files: |
+            kaanapali-master-build.tar.gz
+            out/*
