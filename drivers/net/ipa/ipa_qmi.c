@@ -5,6 +5,7 @@
  */
 
 #include <linux/qrtr.h>
+#include <linux/sizes.h>
 #include <linux/string.h>
 #include <linux/types.h>
 
@@ -407,6 +408,15 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 			req.hw_stats_filter_info.end_index =
 				ipa->fnr_idx_start + ipa->fnr_idx_cnt - 1;
 		}
+	}
+
+	if (ipa->version >= IPA_VERSION_5_5 && ipa->smem_item_size) {
+		req.smem_info_valid = 1;
+		req.smem_info.size = ipa->smem_item_size;
+		/* The first 2 KiB hold the peripheral statistics */
+		req.per_stats_smem_info_valid = 1;
+		req.per_stats_smem_info.start = ipa->smem_addr;
+		req.per_stats_smem_info.size = SZ_2K;
 	}
 
 	return &req;

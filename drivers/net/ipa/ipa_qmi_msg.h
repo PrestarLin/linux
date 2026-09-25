@@ -27,7 +27,7 @@
  */
 #define IPA_QMI_INDICATION_REGISTER_REQ_SZ	20	/* -> server handle */
 #define IPA_QMI_INDICATION_REGISTER_RSP_SZ	7	/* <- server handle */
-#define IPA_QMI_INIT_DRIVER_REQ_SZ		186	/* client handle -> */
+#define IPA_QMI_INIT_DRIVER_REQ_SZ		208	/* client handle -> */
 #define IPA_QMI_INIT_DRIVER_RSP_SZ		25	/* client handle <- */
 #define IPA_QMI_INIT_COMPLETE_IND_SZ		7	/* <- server handle */
 #define IPA_QMI_DRIVER_INIT_COMPLETE_REQ_SZ	4	/* -> server handle */
@@ -228,6 +228,14 @@ struct ipa_init_modem_driver_req {
 	 */
 	u8			hw_stats_filter_info_valid;
 	struct ipa_stats_filter	hw_stats_filter_info;
+
+	/* SMEM region and its peripheral statistics block (IPA v5.5 and
+	 * above)
+	 */
+	u8			smem_info_valid;
+	struct ipa_mem_range	smem_info;
+	u8			per_stats_smem_info_valid;
+	struct ipa_mem_range	per_stats_smem_info;
 };
 
 /* The response to a IPA_QMI_INIT_DRIVER request begins with a standard

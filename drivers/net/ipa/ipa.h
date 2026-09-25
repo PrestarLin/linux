@@ -51,6 +51,8 @@ struct ipa_smp2p;
  * @imem_size:		Size of IMEM region
  * @smem_iova:		I/O virtual address of IPA region in SMEM
  * @smem_size:		Size of SMEM region
+ * @smem_addr:		Physical address of the IPA SMEM item
+ * @smem_item_size:	Size of the IPA SMEM item
  * @zero_addr:		DMA address of preallocated zero-filled memory
  * @zero_virt:		Virtual address of preallocated zero-filled memory
  * @zero_size:		Size (bytes) of preallocated zero-filled memory
@@ -107,6 +109,8 @@ struct ipa {
 
 	unsigned long smem_iova;
 	size_t smem_size;
+	phys_addr_t smem_addr;
+	size_t smem_item_size;
 
 	dma_addr_t zero_addr;
 	void *zero_virt;
