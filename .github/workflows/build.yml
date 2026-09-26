@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache device-tree-compiler systemd-ukify systemd-boot-efi
+          sudo apt-get install -y flex bison libssl-dev libelf-dev bc ccache device-tree-compiler systemd-ukify systemd-boot-efi busybox-static cpio
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -54,6 +54,93 @@ jobs:
           set -euo pipefail
           DTS=arch/arm64/boot/dts/qcom
           mkdir -p out
+
+          # Debug initrd: brings up a USB CDC-ACM + CDC-NCM gadget and a
+          # shell on ttyGS0 so a black screen can still be observed from a
+          # PC (serial log + 192.168.42.1/24), then hands off to the root fs.
+          mkdir -p initrd/bin initrd/dev initrd/proc initrd/sys initrd/newroot
+          cp /bin/busybox initrd/bin/busybox
+          sudo mknod -m 600 initrd/dev/console c 5 1
+          sudo mknod -m 666 initrd/dev/null c 1 3
+          cat > initrd/init <<'INIT'
+          #!/bin/busybox sh
+          B=/bin/busybox
+
+          $B mount -t proc proc /proc 2>/dev/null
+          $B mount -t sysfs sysfs /sys 2>/dev/null
+          $B mount -t devtmpfs devtmpfs /dev 2>/dev/null
+          $B mount -t configfs configfs /sys/kernel/config 2>/dev/null
+
+          # --- USB gadget: CDC-ACM serial + CDC-NCM ethernet ---
+          G=/sys/kernel/config/usb_gadget
+          $B mkdir $G/g 2>/dev/null
+          if $B [ -d $G/g ]; then
+            cd $G/g
+            echo 0x1d6b > idVendor
+            echo 0x0104 > idProduct
+            $B mkdir strings/0x409
+            echo 0123456789 > strings/0x409/serialnumber
+            echo xlie > strings/0x409/manufacturer
+            echo debug > strings/0x409/product
+            $B mkdir functions/acm.0
+            $B mkdir functions/ncm.0
+            $B mkdir configs/c.1
+            $B mkdir configs/c.1/strings/0x409
+            echo cfg > configs/c.1/strings/0x409/configuration
+            $B ln -s functions/acm.0 configs/c.1/
+            $B ln -s functions/ncm.0 configs/c.1/
+            n=0
+            UDC=
+            while $B [ -z "$UDC" ] && $B [ $n -lt 10 ]; do
+              UDC=$($B ls /sys/class/udc | $B head -n 1)
+              $B [ -z "$UDC" ] && $B sleep 1
+              n=$((n+1))
+            done
+            if $B [ -n "$UDC" ]; then
+              echo "$UDC" > UDC
+              echo usb-gadget: bound to $UDC > /dev/kmsg
+            else
+              echo usb-gadget: no UDC found > /dev/kmsg
+            fi
+          fi
+
+          $B sleep 2
+          $B dmesg > /dev/ttyGS0 2>/dev/null &
+          $B cat /proc/kmsg > /dev/ttyGS0 2>/dev/null &
+          $B ifconfig usb0 192.168.42.1 netmask 255.255.255.0 up 2>/dev/null
+          $B ifconfig usb1 192.168.42.1 netmask 255.255.255.0 up 2>/dev/null
+          $B setsid $B sh -i < /dev/ttyGS0 > /dev/ttyGS0 2>&1 &
+
+          # --- hand off to the real root filesystem ---
+          PU=$($B sed -n 's/.*root=PARTUUID=\([^ ]*\).*/\1/p' /proc/cmdline)
+          DEV=$($B blkid | $B grep -i "$PU" | $B sed 's/:.*//')
+          if $B [ -n "$DEV" ]; then
+            $B mkdir -p /newroot
+            if $B mount "$DEV" /newroot; then
+              for i in /init /sbin/init /bin/init /usr/lib/systemd/systemd; do
+                if $B [ -x "/newroot$i" ]; then
+                  echo init: switching root to $i > /dev/kmsg
+                  $B umount /sys/kernel/config 2>/dev/null
+                  $B umount /proc 2>/dev/null
+                  $B umount /sys 2>/dev/null
+                  $B umount /dev 2>/dev/null
+                  exec $B switch_root /newroot "$i"
+                fi
+              done
+              echo init: newroot has no init > /dev/kmsg
+            else
+              echo init: failed to mount $DEV > /dev/kmsg
+            fi
+          fi
+
+          echo init: root handoff failed, debug shell only > /dev/kmsg
+          $B dmesg > /dev/ttyGS0 2>/dev/null &
+          while :; do $B sleep 3600; done
+          INIT
+          chmod 755 initrd/init
+          (cd initrd && find . | cpio -o -H newc --owner root:root | gzip -9 > ../out/initrd.cpio.gz)
+          ls -la out/initrd.cpio.gz
+
           for spec in china:cn global:gl; do
             src="${spec%%:*}"
             tag="${spec##*:}"
@@ -62,8 +149,9 @@ jobs:
               "$DTS/kaanapali-oneplus-infiniti-$src.dtbo"
             ukify build \
               --linux=arch/arm64/boot/Image \
+              --initrd=out/initrd.cpio.gz \
               --devicetree="out/kaanapali-$tag.dtb" \
-              --cmdline='root=PARTUUID=4B3A4040-F3F4-411C-B61B-D9783E4A9E25 earlycon console=tty0 loglevel=8 log_buf_len=16M panic=5 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000 ramoops.mem_address=0xB8000000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000 ramoops.console_size=0x200000 ramoops.max_reason=4' \
+              --cmdline='root=PARTUUID=4B3A4040-F3F4-411C-B61B-D9783E4A9E25 earlycon console=ttyGS0 console=tty0 loglevel=8 log_buf_len=16M panic=5 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000 ramoops.mem_address=0xB8000000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000 ramoops.console_size=0x200000 ramoops.max_reason=4' \
               --uname="$(cat include/config/kernel.release)" \
               --output="out/kaanapali-$tag.efi"
           done
