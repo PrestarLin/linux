@@ -54,12 +54,19 @@ jobs:
           set -euo pipefail
           DTS=arch/arm64/boot/dts/qcom
           mkdir -p out
+
+          # UKI fixups: EFI-stub boot gets no ABL node fixups, so inject the
+          # real memory map (placeholder reg size 0 = instant black screen)
+          # and the ramoops region for post-mortem dmesg via pstore.
+          dtc -@ -I dts -O dtb -o out/uki-fixes.dtbo \
+            "$DTS/kaanapali-oneplus-infiniti-uki-fixes.dts"
           for spec in china:cn global:gl; do
             src="${spec%%:*}"
             tag="${spec##*:}"
             fdtoverlay -i "$DTS/kaanapali-oneplus-infiniti-common.dtb" \
               -o "out/kaanapali-$tag.dtb" \
-              "$DTS/kaanapali-oneplus-infiniti-$src.dtbo"
+              "$DTS/kaanapali-oneplus-infiniti-$src.dtbo" \
+              out/uki-fixes.dtbo
             ukify build \
               --linux=arch/arm64/boot/Image \
               --devicetree="out/kaanapali-$tag.dtb" \
