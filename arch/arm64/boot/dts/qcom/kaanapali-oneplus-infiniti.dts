@@ -1139,6 +1139,12 @@
 	};
 };
 
+&ipa {
+	firmware-name = "qcom/kaanapali/OnePlus/Infiniti/ipa_fws.mbn";
+
+	status = "okay";
+};
+
 &iris {
 	firmware-name = "qcom/kaanapali/OnePlus/Infiniti/vpu40_2v.mbn";
 
