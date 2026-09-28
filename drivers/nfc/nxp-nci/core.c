@@ -165,6 +165,8 @@ int nxp_nci_probe(void *phy_id, struct device *pdev,
 	if (!info->ndev)
 		return -ENOMEM;
 
+	/* Like NXP's own stack, which only resets keeping the configuration */
+	info->ndev->keep_config = true;
 	nci_set_parent_dev(info->ndev, pdev);
 	nci_set_drvdata(info->ndev, info);
 	r = nci_register_device(info->ndev);
