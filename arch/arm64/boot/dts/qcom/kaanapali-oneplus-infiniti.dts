@@ -1369,6 +1369,17 @@
 };
 
 &pmih0108_e1_gpios {
+	pinctrl-0 = <&esim_en_default>;
+	pinctrl-names = "default";
+
+	esim_en_default: esim-en-default-state {
+		pins = "gpio10";
+		function = "normal";
+		power-source = <1>;
+		bias-disable;
+		output-high;
+	};
+
 	svooc_btb_therm_default: svooc-btb-therm-default-state {
 		pins = "gpio15";
 		function = "normal";
