@@ -163,7 +163,8 @@ static void nci_reset_req(struct nci_dev *ndev, const void *opt)
 {
 	struct nci_core_reset_cmd cmd;
 
-	cmd.reset_type = NCI_RESET_TYPE_RESET_CONFIG;
+	cmd.reset_type = ndev->keep_config ? NCI_RESET_TYPE_KEEP_CONFIG :
+					     NCI_RESET_TYPE_RESET_CONFIG;
 	nci_send_cmd(ndev, NCI_OP_CORE_RESET_CMD, 1, &cmd);
 }
 
