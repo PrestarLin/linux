@@ -72,6 +72,9 @@ jobs:
           $B mount -t devtmpfs devtmpfs /dev 2>/dev/null
           $B mount -t configfs configfs /sys/kernel/config 2>/dev/null
 
+          # kick deferred fbcon: any VT write hands the console over from dummy
+          echo "kaanapali debug ramdisk" > /dev/tty1 2>/dev/null
+
           # --- USB gadget: CDC-ACM serial + CDC-NCM ethernet ---
           G=/sys/kernel/config/usb_gadget
           $B mkdir $G/g 2>/dev/null
