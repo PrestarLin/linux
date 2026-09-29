@@ -73,6 +73,9 @@ jobs:
           $B mount -t configfs configfs /sys/kernel/config 2>/dev/null
 
           # diag channel: locate recovery_a (/kb) for persistent logging
+          # the cpio root has no /mnt; without this every mount fails and
+          # the scan below silently logs nowhere
+          $B mkdir -p /mnt
           STAGE=/dev/null
           KBDIR=""
           while read -r major minor blocks name; do
