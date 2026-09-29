@@ -72,8 +72,32 @@ jobs:
           $B mount -t devtmpfs devtmpfs /dev 2>/dev/null
           $B mount -t configfs configfs /sys/kernel/config 2>/dev/null
 
+          # diag channel: locate recovery_a (/kb) for persistent logging
+          STAGE=/dev/null
+          KBDIR=""
+          while read -r major minor blocks name; do
+            case "$name" in
+              ""|loop*|ram*|zram*|dm-*) continue ;;
+            esac
+            $B umount /mnt 2>/dev/null
+            if $B mount -t vfat "/dev/$name" /mnt 2>/dev/null; then
+              if $B [ -f /mnt/kb/kernel ]; then KBDIR="/dev/$name"; break; fi
+              $B umount /mnt 2>/dev/null
+            fi
+          done < /proc/partitions
+          if $B [ -n "$KBDIR" ]; then
+            STAGE=/mnt/kb/stage.txt
+            echo "init: mounts ok, kb=$KBDIR" > $STAGE 2>/dev/null
+            : > /mnt/kb/kmsg.log 2>/dev/null
+            $B cat /proc/kmsg >> /mnt/kb/kmsg.log 2>/dev/null &
+            ( while :; do $B sync; $B sleep 2; done ) &
+          fi
+          echo "init-stage: mounts, kb=$KBDIR" > /dev/kmsg
+
           # kick deferred fbcon: any VT write hands the console over from dummy
           echo "kaanapali debug ramdisk" > /dev/tty1 2>/dev/null
+          echo "init: banner written" >> $STAGE 2>/dev/null
+          echo "init-stage: banner" > /dev/kmsg
 
           # --- USB gadget: CDC-ACM serial + CDC-NCM ethernet ---
           G=/sys/kernel/config/usb_gadget
@@ -107,6 +131,8 @@ jobs:
               echo usb-gadget: no UDC found > /dev/kmsg
             fi
           fi
+          echo "init: gadget=$(if $B [ -d $G/g ]; then echo yes; else echo no; fi) UDC=$UDC" >> $STAGE 2>/dev/null
+          echo "init-stage: gadget, UDC=$UDC" > /dev/kmsg
 
           $B sleep 2
           $B dmesg > /dev/ttyGS0 2>/dev/null &
@@ -116,6 +142,26 @@ jobs:
           $B setsid $B sh -i < /dev/ttyGS0 > /dev/ttyGS0 2>&1 &
 
           # --- the ramdisk is the root: stay here ---------------------------
+          if $B [ -n "$KBDIR" ]; then
+            {
+              echo "== diag =="
+              echo "date: $($B date)"
+              echo "cmdline: $($B cat /proc/cmdline)"
+              echo "-- /sys/class/udc:"
+              $B ls -l /sys/class/udc 2>&1
+              echo "-- gadget UDC file:"
+              $B cat /sys/kernel/config/usb_gadget/g/UDC 2>&1
+              echo "-- usb devices:"
+              for d in /sys/bus/usb/devices/*; do
+                v=$($B cat "$d/idVendor" 2>/dev/null) || continue
+                echo "  $d $v:$($B cat "$d/idProduct" 2>/dev/null)"
+              done
+              echo "-- dmesg:"
+              $B dmesg
+            } > /mnt/kb/diag.txt 2>/dev/null
+            echo "init: idle, diag written" >> $STAGE 2>/dev/null
+          fi
+          echo "init-stage: idle" > /dev/kmsg
           echo init: ramdisk is /, debug shell only > /dev/kmsg
           while :; do $B sleep 3600; done
           INIT
