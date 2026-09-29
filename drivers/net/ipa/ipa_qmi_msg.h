@@ -18,6 +18,9 @@
 #define IPA_QMI_INDICATION_REGISTER	0x20	/* modem -> AP request */
 #define IPA_QMI_INIT_DRIVER		0x21	/* AP -> modem request */
 #define IPA_QMI_INIT_COMPLETE		0x22	/* AP -> modem indication */
+#define IPA_QMI_INSTALL_FILTER_RULE	0x23	/* modem -> AP request */
+#define IPA_QMI_FILTER_INSTALLED_NOTIF	0x24	/* modem -> AP request */
+#define IPA_QMI_CONFIG			0x27	/* modem -> AP request */
 #define IPA_QMI_DRIVER_INIT_COMPLETE	0x35	/* modem -> AP request */
 
 /* The maximum size required for message types.  These sizes include
@@ -32,9 +35,15 @@
 #define IPA_QMI_INIT_COMPLETE_IND_SZ		7	/* <- server handle */
 #define IPA_QMI_DRIVER_INIT_COMPLETE_REQ_SZ	4	/* -> server handle */
 #define IPA_QMI_DRIVER_INIT_COMPLETE_RSP_SZ	7	/* <- server handle */
+#define IPA_QMI_INSTALL_FILTER_RULE_REQ_SZ	33705	/* -> server handle */
+#define IPA_QMI_INSTALL_FILTER_RULE_RSP_SZ	7	/* <- server handle */
+#define IPA_QMI_FILTER_INSTALLED_NOTIF_REQ_SZ	1899	/* -> server handle */
+#define IPA_QMI_FILTER_INSTALLED_NOTIF_RSP_SZ	7	/* <- server handle */
+#define IPA_QMI_CONFIG_REQ_SZ			102	/* -> server handle */
+#define IPA_QMI_CONFIG_RSP_SZ			7	/* <- server handle */
 
 /* Maximum size of messages we expect the AP to receive (max of above) */
-#define IPA_QMI_SERVER_MAX_RCV_SZ		8
+#define IPA_QMI_SERVER_MAX_RCV_SZ		33705
 #define IPA_QMI_CLIENT_MAX_RCV_SZ		25
 
 /* Request message for the IPA_QMI_INDICATION_REGISTER request */
@@ -67,6 +76,19 @@ struct ipa_driver_init_complete_req {
  * of a standard QMI response.
  */
 struct ipa_driver_init_complete_rsp {
+	struct qmi_response_type_v01 rsp;
+};
+
+/* The AP ignores the contents of the INSTALL_FILTER_RULE,
+ * FILTER_INSTALLED_NOTIF and CONFIG requests, so none of their fields
+ * are decoded.
+ */
+struct ipa_qmi_ignored_req {
+	u8 unused;
+};
+
+/* The responses to them consist only of a standard QMI response */
+struct ipa_qmi_generic_rsp {
 	struct qmi_response_type_v01 rsp;
 };
 
@@ -279,5 +301,7 @@ extern const struct qmi_elem_info ipa_mem_range_ei[];
 extern const struct qmi_elem_info ipa_stats_filter_ei[];
 extern const struct qmi_elem_info ipa_init_modem_driver_req_ei[];
 extern const struct qmi_elem_info ipa_init_modem_driver_rsp_ei[];
+extern const struct qmi_elem_info ipa_qmi_ignored_req_ei[];
+extern const struct qmi_elem_info ipa_qmi_generic_rsp_ei[];
 
 #endif /* !_IPA_QMI_MSG_H_ */

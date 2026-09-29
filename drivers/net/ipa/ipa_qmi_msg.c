@@ -822,3 +822,27 @@ const struct qmi_elem_info ipa_init_modem_driver_rsp_ei[] = {
 		.data_type	= QMI_EOTI,
 	},
 };
+
+/* QMI message structure definition for struct ipa_qmi_ignored_req */
+const struct qmi_elem_info ipa_qmi_ignored_req_ei[] = {
+	{
+		.data_type	= QMI_EOTI,
+	},
+};
+
+/* QMI message structure definition for struct ipa_qmi_generic_rsp */
+const struct qmi_elem_info ipa_qmi_generic_rsp_ei[] = {
+	{
+		.data_type	= QMI_STRUCT,
+		.elem_len	= 1,
+		.elem_size	=
+			sizeof_field(struct ipa_qmi_generic_rsp, rsp),
+		.tlv_type	= 0x02,
+		.offset		= offsetof(struct ipa_qmi_generic_rsp, rsp),
+		.ei_array	= qmi_response_type_v01_ei,
+	},
+	{
+		.data_type	= QMI_EOTI,
+	},
+};
+
