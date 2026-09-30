@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Memory-map overlay -- 12G-machine map (the map this tree has
+ * historically shipped in kaanapali-oneplus-infiniti-uki-fixes.dts).
+ *
+ * The source dtb carries a placeholder /memory@a0000000 reg (size 0);
+ * the ABL fills it in, the EFI stub does not, so the real map is injected
+ * here instead.  Choose exactly one of the two memory overlays per boot:
+ *
+ *   kaanapali-oneplus-infiniti-memory-12g.dtbo   12G-machine map
+ *   kaanapali-oneplus-infiniti-memory-16g.dtbo   16G stock dump
+ *
+ * They are never applied together (same target path, replacing reg).
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	fragment@0 {
+		target-path = "/memory@a0000000";
+		__overlay__ {
+			reg = <
+				       0x00000000 0x81960000 0x00000000 0x000a0000 0x00000000 0x81a60000 0x00000000 0x001a0000 0x00000000 0x81cf4000 0x00000000 0x0000c000
+				       0x00000000 0x82478000 0x00000000 0x00028000 0x00000000 0xc4800000 0x00000000 0x13000000 0x00000000 0xd79c0000 0x00000000 0x00040000
+				       0x00000000 0xd7c00000 0x00000000 0x00400000 0x00000000 0xd8800000 0x00000000 0x00000000 0x00000000 0xe34a0000 0x00000000 0x1c360000
+				       0x00000008 0x80000000 0x00000000 0x2f8fe000 0x00000008 0xb0000000 0x00000000 0x08100000 0x00000009 0x80000000 0x00000001 0x80000000
+				       0x00000008 0xc0000000 0x00000000 0xc0000000 0x00000000 0x82600000 0x00000000 0x00100000 0x00000000 0x82800000 0x00000000 0x02200000
+				       0x00000000 0x8a980000 0x00000000 0x00080000 0x00000000 0x9959c000 0x00000000 0x00064000 0x00000000 0x9ce80000 0x00000000 0x02e00000
+				       0x00000000 0x9ffe0000 0x00000000 0x00070000 0x00000000 0xa0910000 0x00000000 0x00a70000 0x00000000 0xa6400000 0x00000000 0x1d9d0000
+			>;
+		};
+	};
+};

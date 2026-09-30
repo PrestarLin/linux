@@ -5,12 +5,17 @@
  * The ABL/Android load path fixes up placeholder nodes at boot; the EFI
  * stub does not, so a UKI embedding the source dtb boots with:
  *
- * - /memory@a0000000 reg size 0 -> the kernel sees no RAM at all and
- *   dies before any driver runs (black screen).  Inject the real memory
- *   map recovered from a live system dump - the one that boots.
  * - no ramoops region -> no pstore console after a failed boot.  Re-add
  *   the 4M region the ABL path reserves at 0xb8000000 so dmesg survives
  *   a reboot for diagnosis.
+ *
+ * The memory map deliberately lives elsewhere, in the choose-one overlays
+ *   kaanapali-oneplus-infiniti-memory-12g.dtbo   12G-machine map
+ *   kaanapali-oneplus-infiniti-memory-16g.dtbo   16G stock dump
+ * applied per machine by the packaging loop.  One map here would overwrite
+ * the other's: a 12G capture read on a 16G unit maps ~30MB of ghost pages
+ * (regions past the end of RAM or inside holes) and handing those to the
+ * page allocator ends in a synchronous external abort.
  */
 /dts-v1/;
 /plugin/;
@@ -20,21 +25,6 @@
 	#size-cells = <2>;
 
 	fragment@0 {
-		target-path = "/memory@a0000000";
-		__overlay__ {
-			reg = <
-				       0x00000000 0x81960000 0x00000000 0x000a0000 0x00000000 0x81a60000 0x00000000 0x001a0000 0x00000000 0x81cf4000 0x00000000 0x0000c000
-				       0x00000000 0x82478000 0x00000000 0x00028000 0x00000000 0xc4800000 0x00000000 0x13000000 0x00000000 0xd79c0000 0x00000000 0x00040000
-				       0x00000000 0xd7c00000 0x00000000 0x00400000 0x00000000 0xd8800000 0x00000000 0x00000000 0x00000000 0xe34a0000 0x00000000 0x1c360000
-				       0x00000008 0x80000000 0x00000000 0x2f8fe000 0x00000008 0xb0000000 0x00000000 0x08100000 0x00000009 0x80000000 0x00000001 0x80000000
-				       0x00000008 0xc0000000 0x00000000 0xc0000000 0x00000000 0x82600000 0x00000000 0x00100000 0x00000000 0x82800000 0x00000000 0x02200000
-				       0x00000000 0x8a980000 0x00000000 0x00080000 0x00000000 0x9959c000 0x00000000 0x00064000 0x00000000 0x9ce80000 0x00000000 0x02e00000
-				       0x00000000 0x9ffe0000 0x00000000 0x00070000 0x00000000 0xa0910000 0x00000000 0x00a70000 0x00000000 0xa6400000 0x00000000 0x1d9d0000
-			>;
-		};
-	};
-
-	fragment@1 {
 		target-path = "/reserved-memory";
 		__overlay__ {
 			ramoops@b8000000 {

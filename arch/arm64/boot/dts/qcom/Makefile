@@ -42,7 +42,7 @@ dtb-$(CONFIG_ARCH_QCOM)	+= ipq9574-rdp454.dtb
 dtb-$(CONFIG_ARCH_QCOM)	+= ipq9650-rdp488.dtb
 dtb-$(CONFIG_ARCH_QCOM)	+= kaanapali-mtp.dtb
 dtb-$(CONFIG_ARCH_QCOM)	+= kaanapali-qrd.dtb
-kaanapali-oneplus-infiniti-dtbs += kaanapali-oneplus-infiniti-common.dtb kaanapali-oneplus-infiniti-global.dtbo kaanapali-oneplus-infiniti-china.dtbo
+kaanapali-oneplus-infiniti-dtbs += kaanapali-oneplus-infiniti-common.dtb kaanapali-oneplus-infiniti-global.dtbo kaanapali-oneplus-infiniti-china.dtbo kaanapali-oneplus-infiniti-memory-12g.dtbo kaanapali-oneplus-infiniti-memory-16g.dtbo
 dtb-$(CONFIG_ARCH_QCOM)	+= kaanapali-oneplus-infiniti-common.dtb kaanapali-oneplus-infiniti.dtb
 dtb-$(CONFIG_ARCH_QCOM)	+= lemans-evk.dtb
 

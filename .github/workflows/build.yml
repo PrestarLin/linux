@@ -172,27 +172,36 @@ jobs:
           (cd initrd && find . | cpio -o -H newc --owner root:root | gzip -9 > ../out/initrd.cpio.gz)
           ls -la out/initrd.cpio.gz
 
-          # UKI fixups: EFI-stub boot gets no ABL node fixups, so inject the
-          # real memory map (placeholder reg size 0 = instant black screen)
-          # and the ramoops region for post-mortem dmesg via pstore.
+          # UKI fixups: EFI-stub boot gets no ABL node fixups, so re-add
+          # the ramoops region for post-mortem dmesg via pstore. The
+          # memory map is a separate, choose-one overlay per machine:
+          # the source dtb carries a placeholder reg (size 0 = instant
+          # black screen without one), and a 12G capture applied on a
+          # 16G unit maps ~30MB of ghost pages that end in a synchronous
+          # external abort. Compose region + memory + ramoops per unit.
           dtc -@ -I dts -O dtb -o out/uki-fixes.dtbo \
             "$DTS/kaanapali-oneplus-infiniti-uki-fixes.dts"
           for spec in china:cn global:gl; do
             src="${spec%%:*}"
             tag="${spec##*:}"
-            fdtoverlay -i "$DTS/kaanapali-oneplus-infiniti-common.dtb" \
-              -o "out/kaanapali-$tag.dtb" \
-              "$DTS/kaanapali-oneplus-infiniti-$src.dtbo" \
-              out/uki-fixes.dtbo
+            for mem in 12g 16g; do
+              fdtoverlay -i "$DTS/kaanapali-oneplus-infiniti-common.dtb" \
+                -o "out/kaanapali-$tag-$mem.dtb" \
+                "$DTS/kaanapali-oneplus-infiniti-$src.dtbo" \
+                "$DTS/kaanapali-oneplus-infiniti-memory-$mem.dtbo" \
+                out/uki-fixes.dtbo
+            done
+            # The UKI ships the 16G map only: the three-piece path picks
+            # the dtb per unit, a UKI has to embed exactly one.
             ukify build \
               --linux=arch/arm64/boot/Image \
               --initrd=out/initrd.cpio.gz \
-              --devicetree="out/kaanapali-$tag.dtb" \
+              --devicetree="out/kaanapali-$tag-16g.dtb" \
               --cmdline='earlycon console=ttyGS0 console=tty0 loglevel=8 log_buf_len=16M panic=30 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000 ramoops.mem_address=0xB8000000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000 ramoops.console_size=0x200000 ramoops.max_reason=4' \
               --uname="$(cat include/config/kernel.release)" \
-              --output="out/kaanapali-$tag.efi"
+              --output="out/kaanapali-$tag-16g.efi"
           done
-          ls -la out/*.efi
+          ls -la out/*.dtb out/*.efi
 
       - name: Package
         run: |
@@ -230,13 +239,19 @@ jobs:
           body: |
             Rolling build of branch `7.2` for OnePlus 15 (kaanapali).
             Every build output is attached as an individual file: Image,
-            kaanapali-cn/gl.dtb, the kaanapali*.dtb/.dtbo set, UKIs,
-            config, BUILD_INFO.txt and `ramdisk` (the pure-boot debug
-            initramfs, same bytes as initrd.cpio.gz) -- with the same
-            files also bundled in kaanapali-7.2-build.tar.gz.
+            kaanapali-cn/gl-{12g,16g}.dtb (region + matching memory map +
+            ramoops), the kaanapali*.dtb/.dtbo set, UKIs, config,
+            BUILD_INFO.txt and `ramdisk` (the pure-boot debug initramfs,
+            same bytes as initrd.cpio.gz) -- with the same files also
+            bundled in kaanapali-7.2-build.tar.gz.
             `ramdisk` + Image + dtb are the `\efisp` three-piece for
             SfbKernelBoot; the ramdisk is the root (no rootfs handoff).
-            `kaanapali-cn.efi` / `kaanapali-gl.efi`: bootable UKIs for `fastboot boot`.
+            Pick the dtb matching the unit's RAM: kaanapali-cn-12g.dtb /
+            kaanapali-cn-16g.dtb (same for gl); the 12G map on a 16G
+            unit maps ghost pages and dies in a synchronous external
+            abort.
+            `kaanapali-cn-16g.efi` / `kaanapali-gl-16g.efi`: bootable
+            UKIs for `fastboot boot` (16G memory map).
             Last commit: ${{ github.sha }}
           files: |
             kaanapali-7.2-build.tar.gz
