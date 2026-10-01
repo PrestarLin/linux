@@ -43,7 +43,6 @@ jobs:
             --customize-hook='systemctl set-default graphical.target' \
             resolute out/rootfs.tar \
             http://ports.ubuntu.com/ubuntu-ports/ \
-            http://ports.ubuntu.com/ubuntu-ports/ resolute-updates \
             2>&1 | tee out/build.log
 
       - name: Compress
@@ -95,6 +94,6 @@ jobs:
         with:
           tag_name: rootfs-latest
           prerelease: true
-          overwrite_files: false
+          overwrite_files: true
           files: |
             out/build.log
