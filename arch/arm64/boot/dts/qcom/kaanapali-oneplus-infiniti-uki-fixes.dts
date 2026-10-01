@@ -32,6 +32,7 @@
 				reg = <0x00 0xb8000000 0x00 0x00400000>;
 				record-size = <0x00040000>;
 				console-size = <0x00200000>;
+				max-reason = <4>;
 			};
 		};
 	};

@@ -197,7 +197,7 @@ jobs:
               --linux=arch/arm64/boot/Image \
               --initrd=out/initrd.cpio.gz \
               --devicetree="out/kaanapali-$tag-16g.dtb" \
-              --cmdline='earlycon console=ttyGS0 console=tty0 loglevel=8 log_buf_len=16M panic=30 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000 ramoops.mem_address=0xB8000000 ramoops.mem_size=0x400000 ramoops.record_size=0x40000 ramoops.console_size=0x200000 ramoops.max_reason=4' \
+              --cmdline='earlycon console=ttyGS0 console=tty0 loglevel=8 log_buf_len=16M panic=30 clk_ignore_unused pd_ignore_unused memmap=4M$0xB8000000' \
               --uname="$(cat include/config/kernel.release)" \
               --output="out/kaanapali-$tag-16g.efi"
           done
