@@ -39,7 +39,6 @@ jobs:
             --customize-hook='sed -i -e "s/^# \(zh_CN.UTF-8 UTF-8\)$/\1/" -e "s/^# \(en_US.UTF-8 UTF-8\)$/\1/" /etc/locale.gen && locale-gen' \
             --customize-hook='update-locale LANG=zh_CN.UTF-8' \
             --customize-hook='for d in /etc/gdm3 /etc/gdm; do mkdir -p $d; printf "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=op15\n" > $d/custom.conf; done' \
-            --customize-hook='systemctl enable ssh NetworkManager' \
             --customize-hook='systemctl set-default graphical.target' \
             resolute out/rootfs.tar \
             http://ports.ubuntu.com/ubuntu-ports/ \
