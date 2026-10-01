@@ -1,0 +1,88 @@
+name: rootfs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['7.2']
+    paths:
+      - '.github/workflows/rootfs-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rootfs:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mmdebstrap zstd
+
+      - name: Build Ubuntu 26.04 GNOME rootfs
+        run: |
+          mkdir -p out
+          sudo mmdebstrap --arch=arm64 \
+            --variant=apt \
+            --components=main,universe,restricted,multiverse \
+            --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg \
+            --include=gnome-core,sudo,locales,console-setup,openssh-server,network-manager,ca-certificates,curl,iproute2,iputils-ping,pciutils,usbutils,f2fs-tools,e2fsprogs,dosfstools,mesa-utils,systemd-sysv,dbus-user-session,less,vim-tiny \
+            --customize-hook='useradd -m -s /bin/bash -G sudo,sudo op15 || true' \
+            --customize-hook='echo op15:op15 | chpasswd' \
+            --customize-hook='echo "op15 ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/op15 && chmod 440 /etc/sudoers.d/op15' \
+            --customize-hook='echo op15-nfs > /etc/hostname' \
+            --customize-hook='printf "127.0.0.1 localhost\n127.0.1.1 op15-nfs\n::1 localhost ip6-localhost ip6-loopback\n" > /etc/hosts' \
+            --customize-hook='sed -i -e "s/^# \(zh_CN.UTF-8 UTF-8\)$/\1/" -e "s/^# \(en_US.UTF-8 UTF-8\)$/\1/" /etc/locale.gen && locale-gen' \
+            --customize-hook='update-locale LANG=zh_CN.UTF-8' \
+            --customize-hook='for d in /etc/gdm3 /etc/gdm; do mkdir -p $d; printf "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=op15\n" > $d/custom.conf; done' \
+            --customize-hook='systemctl enable ssh NetworkManager' \
+            --customize-hook='systemctl set-default graphical.target' \
+            resolute out/rootfs.tar \
+            http://ports.ubuntu.com/ubuntu-ports/ \
+            http://ports.ubuntu.com/ubuntu-ports/ resolute-updates
+
+      - name: Compress
+        run: |
+          zstd -T0 -10 -f out/rootfs.tar -o out/ubuntu-26.04-resolute-gnome-arm64.tar.zst
+          rm out/rootfs.tar
+          ls -l out/
+
+      - name: Build info
+        run: |
+          {
+            echo "commit: ${GITHUB_SHA}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runner: ARM64"
+            echo "suite: resolute (Ubuntu 26.04 LTS)"
+            echo "components: gnome-core desktop, gdm autologin, zh_CN.UTF-8"
+            echo "user: op15 / op15 (NOPASSWD sudo)"
+            echo "mirror: http://ports.ubuntu.com/ubuntu-ports/"
+          } > out/BUILD_INFO.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-rootfs
+          path: out/
+          retention-days: 15
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rootfs-latest
+          name: "ubuntu 26.04 gnome rootfs latest"
+          prerelease: true
+          overwrite_files: true
+          body: |
+            Rolling Ubuntu 26.04 (resolute) LTS arm64 rootfs with GNOME
+            desktop, built from the official ports mirror for the
+            OnePlus 15 NFS-root setup.
+            Unpack onto the NAS share and export it over NFSv4.2;
+            the ramdisk fetches it after Wi-Fi is up and switch_roots
+            into it (user op15 / op15, gdm autologin, zh_CN.UTF-8).
+            Last commit: ${{ github.sha }}
+          files: |
+            out/*
