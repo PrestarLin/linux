@@ -23,9 +23,10 @@ jobs:
           sudo apt-get install -y mmdebstrap zstd
 
       - name: Build Ubuntu 26.04 GNOME rootfs
+        shell: bash
         run: |
           mkdir -p out
-          sudo mmdebstrap --arch=arm64 \
+          sudo mmdebstrap --debug --arch=arm64 \
             --variant=apt \
             --components=main,universe,restricted,multiverse \
             --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg \
@@ -42,7 +43,8 @@ jobs:
             --customize-hook='systemctl set-default graphical.target' \
             resolute out/rootfs.tar \
             http://ports.ubuntu.com/ubuntu-ports/ \
-            http://ports.ubuntu.com/ubuntu-ports/ resolute-updates
+            http://ports.ubuntu.com/ubuntu-ports/ resolute-updates \
+            2>&1 | tee out/build.log
 
       - name: Compress
         run: |
@@ -86,3 +88,13 @@ jobs:
             Last commit: ${{ github.sha }}
           files: |
             out/*
+
+      - name: Publish build log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rootfs-latest
+          prerelease: true
+          overwrite_files: false
+          files: |
+            out/build.log
