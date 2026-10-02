@@ -806,11 +806,14 @@ static const char * const imx709_test_pattern_menu[] = {
 	"PN9",
 };
 
+static const unsigned int imx709_xclk_retry_ms[] = { 10, 20, 50, 100 };
+
 static int imx709_power_on(struct device *dev)
 {
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct imx709 *imx709 = to_imx709(sd);
-	int i, ret;
+	unsigned int i;
+	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(imx709->supplies),
 				    imx709->supplies);
@@ -819,13 +822,15 @@ static int imx709_power_on(struct device *dev)
 		return ret;
 	}
 
-	/* The MCLK sometimes fails to start on the first try after boot */
-	for (i = 0; i < 3; i++) {
+	/* The MCLK sometimes fails to start after boot */
+	for (i = 0; i <= ARRAY_SIZE(imx709_xclk_retry_ms); i++) {
 		ret = clk_prepare_enable(imx709->xclk);
-		if (ret != -EBUSY)
+		if (ret != -EBUSY || i == ARRAY_SIZE(imx709_xclk_retry_ms))
 			break;
-		dev_warn(dev, "clock did not start, retrying\n");
-		usleep_range(1000, 2000);
+		dev_warn_ratelimited(dev,
+				     "clock did not start, retrying in %u ms\n",
+				     imx709_xclk_retry_ms[i]);
+		msleep(imx709_xclk_retry_ms[i]);
 	}
 	if (ret) {
 		dev_err(dev, "failed to enable clock: %d\n", ret);
@@ -851,6 +856,19 @@ static int imx709_power_off(struct device *dev)
 	regulator_bulk_disable(ARRAY_SIZE(imx709->supplies), imx709->supplies);
 
 	return 0;
+}
+
+/* camss waits for every sensor, so a failed probe loses all cameras */
+static int imx709_probe_power_on(struct device *dev)
+{
+	int ret;
+
+	ret = imx709_power_on(dev);
+	if (ret == -EBUSY)
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				     "clock did not start\n");
+
+	return ret;
 }
 
 static int imx709_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -1220,7 +1238,7 @@ static int imx709_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to get regulators\n");
 
-	ret = imx709_power_on(dev);
+	ret = imx709_probe_power_on(dev);
 	if (ret)
 		return ret;
 
@@ -1230,7 +1248,7 @@ static int imx709_probe(struct i2c_client *client)
 		dev_warn(dev, "chip ID 0x%04llx (%d), power cycling\n", id, ret);
 		imx709_power_off(dev);
 		usleep_range(10000, 11000);
-		ret = imx709_power_on(dev);
+		ret = imx709_probe_power_on(dev);
 		if (ret)
 			return ret;
 		ret = cci_read(imx709->regmap, IMX709_REG_CHIP_ID, &id, NULL);
