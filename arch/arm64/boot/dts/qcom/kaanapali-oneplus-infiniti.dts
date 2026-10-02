@@ -900,6 +900,15 @@
 	status = "disabled";
 };
 
+/* Cluster and system idle states hang the SoC after hours idle, as on X1 */
+&cluster0_pd {
+	/delete-property/ domain-idle-states;
+};
+
+&cluster1_pd {
+	/delete-property/ domain-idle-states;
+};
+
 &csiphy1 {
 	vdda-0p9-supply = <&vreg_l3i_0p8>;
 	vdda-1p2-supply = <&vreg_l1d_1p2>;
@@ -1599,6 +1608,10 @@
 		reg = <0 3>;
 		qcom,tx-port-mapping = <2 2 3 4>;
 	};
+};
+
+&system_pd {
+	/delete-property/ domain-idle-states;
 };
 
 &tlmm {
