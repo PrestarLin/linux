@@ -38,7 +38,30 @@ jobs:
           grep -E '^CONFIG_DRM_MSM=y|^CONFIG_SCSI_UFS_QCOM=y|^CONFIG_USB_CONFIGFS=y|^CONFIG_DRM_PANEL_ONEPLUS15_A0020=y|^CONFIG_QCOM_CPUCP_MBOX=y|^CONFIG_PHY_QCOM_EUSB2_REPEATER=y' .config
 
       - name: Build
-        run: make ARCH=arm64 -j"$(nproc)" Image dtbs
+        run: |
+          set -o pipefail
+          make ARCH=arm64 -j"$(nproc)" Image dtbs 2>&1 | tee build.log
+
+      # Job logs API needs admin rights (403 for this account), so surface
+      # the compile errors directly in the step summary on failure.
+      - name: Publish build log on failure
+        if: failure()
+        run: |
+          {
+            echo '### Build failed — last 400 lines'
+            echo '```'
+            tail -n 400 build.log 2>/dev/null || echo 'no build.log produced'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E "error:|Error [0-9]|undefined reference" build.log 2>/dev/null | tail -n 50 || true
+
+      - name: Upload build log artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
 
       - name: Bake stock memory map into dtb
         run: |
