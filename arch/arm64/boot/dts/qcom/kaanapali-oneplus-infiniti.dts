@@ -255,7 +255,12 @@
 		#size-cells = <2>;
 		ranges;
 
-		cont_splash_mem: memory@fc800000 {
+		/*
+		 * The bootloader will only keep display hardware enabled
+		 * if this memory region is named exactly 'splash_region'
+		 */
+
+		splash_memory: splash_region@fc800000 {
 			reg = <0x0 0xfc800000 0x0 0x2b00000>;
 			no-map;
 		};

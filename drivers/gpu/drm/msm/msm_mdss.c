@@ -7,11 +7,11 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/interconnect.h>
-#include <linux/iopoll.h>
 #include <linux/irq.h>
 #include <linux/irqchip.h>
 #include <linux/irqdesc.h>
 #include <linux/irqchip/chained_irq.h>
+#include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -24,6 +24,19 @@
 #include <generated/mdss.xml.h>
 
 #define MIN_IB_BW	400000000UL /* Min ib vote 400MB */
+
+static bool msm_mdss_skip_reset;
+module_param_named(skip_mdss_reset, msm_mdss_skip_reset, bool, 0644);
+MODULE_PARM_DESC(skip_mdss_reset,
+		 "Skip MDSS core reset on probe (UEFI continuous splash handoff)");
+
+static bool msm_mdss_should_skip_reset(struct device *dev)
+{
+	if (msm_mdss_skip_reset)
+		return true;
+
+	return device_property_read_bool(dev, "qcom,skip-mdss-reset");
+}
 
 struct msm_mdss_data {
 	u32 reg_bus_bw;
@@ -45,7 +58,6 @@ struct msm_mdss {
 	struct icc_path *mdp_path[2];
 	u32 num_mdp_paths;
 	struct icc_path *reg_bus_path;
-	struct reset_control *splash_reset;
 };
 
 static int msm_mdss_parse_data_bus_icc_path(struct device *dev,
@@ -230,31 +242,10 @@ static void msm_mdss_6x_setup_ubwc(struct msm_mdss *msm_mdss)
 	 (((minor) & 0xfff) << 16) |	\
 	 ((step) & 0xffff))
 
-static void msm_mdss_setup_ubwc(struct msm_mdss *msm_mdss)
-{
-	u32 hw_rev;
-
-	/*
-	 * Register access requires MDSS_MDP_CLK, which is not enabled by the
-	 * mdss on mdp5 hardware. Skip it for now.
-	 */
-	if (msm_mdss->is_mdp5 || !msm_mdss->mdss_data)
-		return;
-
-	hw_rev = readl_relaxed(msm_mdss->mmio + REG_MDSS_HW_VERSION);
-
-	if (hw_rev >= MDSS_HW_VER(6, 0, 0))
-		msm_mdss_6x_setup_ubwc(msm_mdss);
-	else if (hw_rev >= MDSS_HW_VER(5, 0, 0))
-		msm_mdss_5x_setup_ubwc(msm_mdss);
-	else if (hw_rev >= MDSS_HW_VER(4, 0, 0))
-		msm_mdss_4x_setup_ubwc(msm_mdss);
-	/* else UBWC 1.0 or none, no params to program */
-}
-
 static int msm_mdss_enable(struct msm_mdss *msm_mdss)
 {
 	int ret, i;
+	u32 hw_rev;
 
 	/*
 	 * Several components have AXI clocks that can only be turned on if
@@ -281,9 +272,24 @@ static int msm_mdss_enable(struct msm_mdss *msm_mdss)
 		return ret;
 	}
 
-	msm_mdss_setup_ubwc(msm_mdss);
+	/*
+	 * Register access requires MDSS_MDP_CLK, which is not enabled by the
+	 * mdss on mdp5 hardware. Skip it for now.
+	 */
+	if (msm_mdss->is_mdp5 || !msm_mdss->mdss_data)
+		return 0;
 
-	return 0;
+	hw_rev = readl_relaxed(msm_mdss->mmio + REG_MDSS_HW_VERSION);
+
+	if (hw_rev >= MDSS_HW_VER(6, 0, 0))
+		msm_mdss_6x_setup_ubwc(msm_mdss);
+	else if (hw_rev >= MDSS_HW_VER(5, 0, 0))
+		msm_mdss_5x_setup_ubwc(msm_mdss);
+	else if (hw_rev >= MDSS_HW_VER(4, 0, 0))
+		msm_mdss_4x_setup_ubwc(msm_mdss);
+	/* else UBWC 1.0 or none, no params to program */
+
+	return ret;
 }
 
 static int msm_mdss_disable(struct msm_mdss *msm_mdss)
@@ -308,18 +314,15 @@ static void msm_mdss_destroy(struct msm_mdss *msm_mdss)
 
 	pm_runtime_suspend(msm_mdss->dev);
 	pm_runtime_disable(msm_mdss->dev);
-	reset_control_put(msm_mdss->splash_reset);
 	irq_domain_remove(msm_mdss->irq_controller.domain);
 	msm_mdss->irq_controller.domain = NULL;
 	irq = platform_get_irq(pdev, 0);
 	irq_set_chained_handler_and_data(irq, NULL, NULL);
 }
 
-static int msm_mdss_reset(struct msm_mdss *msm_mdss)
+static int msm_mdss_reset(struct device *dev)
 {
-	struct device *dev = msm_mdss->dev;
 	struct reset_control *reset;
-	int ret;
 
 	reset = reset_control_get_optional_exclusive(dev, NULL);
 	if (!reset) {
@@ -328,25 +331,6 @@ static int msm_mdss_reset(struct msm_mdss *msm_mdss)
 	} else if (IS_ERR(reset)) {
 		return dev_err_probe(dev, PTR_ERR(reset),
 				     "failed to acquire mdss reset\n");
-	}
-
-	if (!msm_mdss->is_mdp5) {
-		bool splash;
-
-		ret = clk_bulk_prepare_enable(msm_mdss->num_clocks, msm_mdss->clocks);
-		if (ret) {
-			reset_control_put(reset);
-			return ret;
-		}
-
-		splash = dpu_boot_splash(dev, false);
-		clk_bulk_disable_unprepare(msm_mdss->num_clocks, msm_mdss->clocks);
-
-		/* Keep the splash screen until the KMS takes over */
-		if (splash) {
-			msm_mdss->splash_reset = reset;
-			return 0;
-		}
 	}
 
 	reset_control_assert(reset);
@@ -360,43 +344,6 @@ static int msm_mdss_reset(struct msm_mdss *msm_mdss)
 	reset_control_put(reset);
 
 	return 0;
-}
-
-static struct platform_driver mdss_platform_driver;
-
-void msm_mdss_take_over_splash(struct device *dev)
-{
-	struct msm_mdss *msm_mdss;
-	struct reset_control *reset;
-	u32 hw_rev;
-
-	if (!dev || dev->driver != &mdss_platform_driver.driver)
-		return;
-
-	msm_mdss = dev_get_drvdata(dev);
-	reset = msm_mdss->splash_reset;
-	if (!reset)
-		return;
-
-	msm_mdss->splash_reset = NULL;
-
-	pm_runtime_get_sync(dev);
-
-	dpu_boot_splash(dev, true);
-
-	reset_control_assert(reset);
-	msleep(20);
-	reset_control_deassert(reset);
-	reset_control_put(reset);
-
-	/* The registers read as zero for a moment after the reset */
-	if (readl_poll_timeout(msm_mdss->mmio + REG_MDSS_HW_VERSION, hw_rev,
-			       hw_rev, 10, 20000))
-		dev_warn(dev, "MDSS did not come out of reset\n");
-
-	msm_mdss_setup_ubwc(msm_mdss);
-
-	pm_runtime_put_sync(dev);
 }
 
 /*
@@ -436,6 +383,14 @@ static struct msm_mdss *msm_mdss_init(struct platform_device *pdev, bool is_mdp5
 	int ret;
 	int irq;
 
+	ret = 0;
+	if (!msm_mdss_should_skip_reset(&pdev->dev))
+		ret = msm_mdss_reset(&pdev->dev);
+	else
+		dev_info(&pdev->dev, "skipping MDSS reset for continuous splash handoff\n");
+	if (ret)
+		return ERR_PTR(ret);
+
 	msm_mdss = devm_kzalloc(&pdev->dev, sizeof(*msm_mdss), GFP_KERNEL);
 	if (!msm_mdss)
 		return ERR_PTR(-ENOMEM);
@@ -472,10 +427,6 @@ static struct msm_mdss *msm_mdss_init(struct platform_device *pdev, bool is_mdp5
 	msm_mdss->is_mdp5 = is_mdp5;
 
 	msm_mdss->dev = &pdev->dev;
-
-	ret = msm_mdss_reset(msm_mdss);
-	if (ret)
-		return ERR_PTR(ret);
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
