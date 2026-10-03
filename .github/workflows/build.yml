@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flex bison libssl-dev libelf-dev bc device-tree-compiler
+          sudo apt-get install -y flex bison libssl-dev libelf-dev bc device-tree-compiler kmod
 
       - name: Configure
         run: |
@@ -40,7 +40,7 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          make ARCH=arm64 -j"$(nproc)" Image dtbs 2>&1 | tee build.log
+          make ARCH=arm64 -j"$(nproc)" Image dtbs modules 2>&1 | tee build.log
 
       # Job logs API needs admin rights (403 for this account), so surface
       # the compile errors directly in the step summary on failure.
@@ -122,6 +122,19 @@ jobs:
           tar -C out -czf kaanapali-mainline-build.tar.gz .
           ls -la out/
 
+      # =m peripherals (touch/IR/audio userspace bits) ship to the rootfs:
+      # rootfs-build.yml downloads this tarball and extracts it to /
+      # so /lib/modules/<release> matches the booted kernel.
+      - name: Install modules
+        run: |
+          make ARCH=arm64 modules_install INSTALL_MOD_PATH=modinstall
+          rm -rf modinstall/lib/modules/*/build modinstall/lib/modules/*/source
+          REL=$(ls modinstall/lib/modules)
+          tar -C modinstall -czf out/kernel-modules.tar.gz lib
+          echo "modules for $REL:"
+          tar -tzf out/kernel-modules.tar.gz | grep -c '\.ko' || true
+          ls -la out/kernel-modules.tar.gz
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -141,6 +154,8 @@ jobs:
             arch/arm64/configs/oneplus15-cn.config (primary; merged after the
             upstream kaanapali.config stub). Boot chain =y, desktop
             peripherals =m (modules land in rootfs via modules_install).
+            Assets: Image + kaanapali*.dtb + config + kernel-modules.tar.gz
+            (extract at / on the rootfs so /lib/modules/<release> matches).
             CI source tree: ${{ github.repository }}@${{ github.sha }}.
           files: |
             kaanapali-mainline-build.tar.gz
