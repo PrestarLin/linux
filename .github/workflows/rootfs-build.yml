@@ -44,6 +44,25 @@ jobs:
             http://ports.ubuntu.com/ubuntu-ports/ \
             2>&1 | tee out/build.log
 
+      # Append the rolling mainline build's =m modules (touch/IR etc.) so
+      # /lib/modules/<release> matches the booted kernel after switch_root.
+      # kernel CI packs them as kernel-modules.tar.gz on mainline-latest;
+      # --owner=0 because modules_install ran as the runner user (uid 1001),
+      # and tar -r appends so later entries win over any pre-existing
+      # /lib/modules entries at extraction time.
+      - name: Inject mainline kernel modules
+        run: |
+          curl -fsSL --retry 3 -o out/kmods.tar.gz \
+            https://github.com/PrestarLin/linux/releases/download/mainline-latest/kernel-modules.tar.gz
+          mkdir kstage
+          tar -xzf out/kmods.tar.gz -C kstage
+          rm out/kmods.tar.gz
+          test -n "$(ls -A kstage/lib/modules)"
+          echo "injecting: $(ls kstage/lib/modules)"
+          tar --owner=0 --group=0 --numeric-owner -rf out/rootfs.tar -C kstage lib
+          rm -rf kstage
+          tar -tf out/rootfs.tar | grep '^lib/modules/' | head -5
+
       - name: Compress
         run: |
           zstd -T0 -10 -f out/rootfs.tar -o out/ubuntu-26.04-resolute-gnome-arm64.tar.zst
@@ -60,6 +79,7 @@ jobs:
             echo "components: gnome-core desktop, gdm autologin, zh_CN.UTF-8"
             echo "user: op15 / op15 (NOPASSWD sudo)"
             echo "mirror: http://ports.ubuntu.com/ubuntu-ports/"
+            echo "kernel-modules: appended from mainline-latest (kernel-modules.tar.gz)"
           } > out/BUILD_INFO.txt
 
       - name: Upload artifacts
@@ -83,6 +103,8 @@ jobs:
             Unpack onto the NAS share and export it over NFSv4.2;
             the ramdisk fetches it after Wi-Fi is up and switch_roots
             into it (user op15 / op15, gdm autologin, zh_CN.UTF-8).
+            /lib/modules carries the mainline-latest =m modules so the
+            desktop peripherals (touch/IR) match the booted kernel.
             Last commit: ${{ github.sha }}
           files: |
             out/*
