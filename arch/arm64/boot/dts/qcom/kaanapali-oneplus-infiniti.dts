@@ -1152,13 +1152,15 @@
 	status = "okay";
 };
 
-&mdss_dp0 {
-	status = "okay";
-};
-
-&mdss_dp0_out {
-	link-frequencies = /bits/ 64 <1620000000 2700000000 5400000000 8100000000>;
-};
+/*
+ * DP0 stays disabled, as in the proven 7.2 tree (its infiniti dts has no
+ * &mdss_dp0 at all). displayport-controller@9ad2000 never finishes probing
+ * here: it waits on the qmp phys, so it sits in the deferred list forever.
+ * add_mdp_components() turns every available mdss graph peer into a required
+ * component, and the DRM master only binds once all of them call
+ * component_add(). With DP0 in that set, msm_drm_bind() never runs: no
+ * /dev/dri, no modeset, and the panel keeps showing the bootloader frame.
+ */
 
 &mdss_dsi0 {
 	vdda-supply = <&vreg_l1d_1p2>;
