@@ -45,12 +45,15 @@ jobs:
           DTB=arch/arm64/boot/dts/qcom/kaanapali-oneplus-infiniti.dtb
           fdtput -t x "$DTB" /memory@a0000000 reg $(cat .github/memory-map.txt)
           echo "memory reg now: $(fdtget -t x "$DTB" /memory@a0000000 reg | head -c 96) ..."
-          # Upstream dts also ships NO /chosen node. PatchChosen (mainlinedebug/
-          # SfbKernelBoot) requires bootargs + linux,initrd-start/end to all be
-          # present; if missing it fails into the (disabled) file log and boot
-          # silently stops after the span line. Create it with a 1025-byte
-          # bootargs placeholder and zeroed u64 initrd slots.
-          fdtput -c "$DTB" /chosen
+          # Master dts already ships /chosen (holds simple-framebuffer under it).
+          # fdtput -c errors FDT_ERR_EXISTS on an EXISTING node, so probe with
+          # `fdtget -p` and create only when missing (bit-exact replay of this
+          # recipe against the raw upstream dtb passes 5/5). PatchChosen
+          # (mainlinedebug/SfbKernelBoot) requires bootargs + linux,initrd-start/
+          # end to all be present; if missing it fails into the (disabled) file
+          # log and boot silently stops after the span line. bootargs gets a
+          # 1025-byte placeholder (1024 a's + NUL), initrd slots start zeroed.
+          fdtget -p "$DTB" /chosen >/dev/null 2>&1 || fdtput -c "$DTB" /chosen
           fdtput -t s "$DTB" /chosen bootargs "$(printf 'a%.0s' $(seq 1 1024))"
           fdtput -t x "$DTB" /chosen linux,initrd-start 0 0
           fdtput -t x "$DTB" /chosen linux,initrd-end 0 0
