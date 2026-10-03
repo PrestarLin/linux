@@ -52,6 +52,10 @@ jobs:
       # /lib/modules entries at extraction time.
       - name: Inject mainline kernel modules
         run: |
+          # mmdebstrap ran under sudo: out/rootfs.tar is root:644 and
+          # tar -r needs O_RDWR (fails with "Cannot read: Bad file
+          # descriptor" otherwise). Hand the file to the runner user.
+          sudo chown "$(id -u):$(id -g)" out/rootfs.tar
           curl -fsSL --retry 3 -o out/kmods.tar.gz \
             https://github.com/PrestarLin/linux/releases/download/mainline-latest/kernel-modules.tar.gz
           mkdir kstage
