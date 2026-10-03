@@ -6,6 +6,8 @@
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+#include <dt-bindings/thermal/thermal.h>
 #include "kaanapali.dtsi"
 
 #include "pm8010-kaanapali.dtsi"     /* SPMI1: SID-12/13   */
@@ -173,8 +175,17 @@
 		 * PMH0101 GPIO 6, not TLMM 101 (that is kaanapali-mtp/QRD).
 		 * Volume-up stays on pmk8850 pon_resin.
 		 */
-		pinctrl-0 = <&key_vol_down_default>;
+		pinctrl-0 = <&key_vol_down_default>, <&key_plus_default>;
 		pinctrl-names = "default";
+
+		key-plus {
+			label = "Plus Key";
+			linux,code = <KEY_PROG1>;
+			gpios = <&tlmm 97 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
 
 		key-volume-down {
 			label = "Volume Down";
@@ -1115,7 +1126,8 @@
 };
 
 &lpass_txmacro {
-	status = "disabled";
+	/* Needed by the WCD capture path (qcom,kaanapali-sndcard). */
+	status = "okay";
 };
 
 &lpass_wsamacro {
@@ -1235,18 +1247,20 @@
 	tfa9874_l: codec@34 { /* Top Speaker */
 		compatible = "nxp,tfa9874";
 		reg = <0x34>;
-		reset-gpio = <&tlmm 2 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&tlmm 2 GPIO_ACTIVE_LOW>;
 		sound-name-prefix = "Speaker Left";
-		#sound-dai-cells = <1>;
+		vddd-supply = <&vreg_l15b_1p8>;
+		#sound-dai-cells = <0>;
 		sound-channel = <0>;
 	};
 
 	tfa9874_r: codec@35 { /* Bottom Speaker */
 		compatible = "nxp,tfa9874";
 		reg = <0x35>;
-		reset-gpio = <&tlmm 160 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&tlmm 160 GPIO_ACTIVE_LOW>;
 		sound-name-prefix = "Speaker Right";
-		#sound-dai-cells = <1>;
+		vddd-supply = <&vreg_l15b_1p8>;
+		#sound-dai-cells = <0>;
 		sound-channel = <1>;
 	};
 };
@@ -1273,6 +1287,51 @@
 			       <74 1>,  /* eSE */
 			       <119 2>, /* SoCCP */
 			       <144 4>; /* CXM UART */
+
+	key_plus_default: key-plus-default-state {
+		pins = "gpio97";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	wcd_default: wcd-reset-n-active-state {
+		pins = "gpio161";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	speaker_mi2s_active: speaker-mi2s-active-state {
+		sck-pins {
+			pins = "gpio122";
+			function = "i2s0_sck";
+			drive-strength = <4>;
+			bias-disable;
+		};
+
+		data0-pins {
+			pins = "gpio123";
+			function = "i2s0_data0";
+			drive-strength = <4>;
+			bias-disable;
+		};
+
+		data1-pins {
+			pins = "gpio124";
+			function = "i2s0_data1";
+			drive-strength = <4>;
+			bias-pull-down;
+		};
+
+		ws-pins {
+			pins = "gpio125";
+			function = "i2s0_ws";
+			drive-strength = <4>;
+			bias-disable;
+		};
+	};
+
 	wlan_en: wlan-en-state {
 		pins = "gpio16";
 		function = "gpio";
@@ -1566,4 +1625,314 @@
 	memory-region = <&ipa_fw_mem>;
 	firmware-name = "ipa_fws.mdt";
 	status = "disabled";
+};
+
+/*
+ * Audio (ported from infiniti-mainline/linux oneplus15-mainline snapshot):
+ * WCD9395 codec + soundwire TX/RX + TFA amp playback over PRIMARY_MI2S.
+ */
+/ {
+	wcd939x: audio-codec {
+		compatible = "qcom,wcd9395-codec", "qcom,wcd9390-codec";
+
+		pinctrl-0 = <&wcd_default>;
+		pinctrl-names = "default";
+
+		qcom,micbias1-microvolt = <2700000>;
+		qcom,micbias2-microvolt = <2700000>;
+		qcom,micbias3-microvolt = <2700000>;
+		qcom,micbias4-microvolt = <2700000>;
+		qcom,mbhc-buttons-vthreshold-microvolt = <75000 150000 237000 500000
+							  500000 500000 500000 500000>;
+		qcom,mbhc-headset-vthreshold-microvolt = <1700000>;
+		qcom,mbhc-headphone-vthreshold-microvolt = <50000>;
+		qcom,rx-device = <&wcd_rx>;
+		qcom,tx-device = <&wcd_tx>;
+
+		reset-gpios = <&tlmm 161 GPIO_ACTIVE_LOW>;
+
+		vdd-buck-supply = <&vreg_l15b_1p8>;
+		vdd-rxtx-supply = <&vreg_l15b_1p8>;
+		vdd-io-supply = <&vreg_l15b_1p8>;
+		vdd-mic-bias-supply = <&vreg_bob1>;
+		vdd-px-supply = <&vreg_l1g_1p2>;
+
+		#sound-dai-cells = <1>;
+
+		mode-switch;
+		orientation-switch;
+
+		port {
+			wcd_codec_headset_in: endpoint {
+				remote-endpoint = <&wcd_usbss_headset_out>;
+			};
+		};
+	};
+
+	sound {
+		compatible = "qcom,kaanapali-sndcard", "qcom,sm8450-sndcard";
+		model = "OnePlus-Infiniti";
+		pinctrl-0 = <&speaker_mi2s_active>;
+		pinctrl-names = "default";
+
+		audio-routing = "AMIC1", "MIC BIAS1",
+				"AMIC3", "MIC BIAS4",
+				"AMIC5", "MIC BIAS1",
+				"TX SWR_INPUT0", "ADC1_OUTPUT";
+
+		wcd-capture-dai-link {
+			link-name = "WCD Capture";
+
+			codec {
+				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_txmacro 0>;
+			};
+
+			cpu {
+				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		speaker-playback-dai-link {
+			link-name = "Speaker Playback";
+
+			codec {
+				sound-dai = <&tfa9874_l>, <&tfa9874_r>;
+			};
+
+			cpu {
+				sound-dai = <&q6apmbedai PRIMARY_MI2S_RX>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+	};
+
+	thermal-zones {
+		skin-thermal {
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&pmk8850_vadc ADC5_GEN4_AMUX1_THM_100K_PU(0, 1)>;
+
+			trips {
+				skin_alert0: trip-point0 {
+					temperature = <46000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				skin_alert1: trip-point1 {
+					temperature = <50000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-point2 {
+					temperature = <70000>;
+					hysteresis = <1000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&skin_alert0>;
+					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+
+				map1 {
+					trip = <&skin_alert1>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+};
+
+&i2c3 {
+	status = "okay";
+
+	wcd_usbss: typec-mux@e {
+		compatible = "qcom,wcd9395-usbss", "qcom,wcd9390-usbss";
+		reg = <0xe>;
+
+		vdd-supply = <&vreg_l15b_1p8>;
+		mode-switch;
+		orientation-switch;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				/* pmic_glink_sbu endpoint is commented out in
+				 * pmic-glink above; wire it up when that returns. */
+				wcd_usbss_sbu_mux: endpoint {
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				wcd_usbss_headset_out: endpoint {
+					remote-endpoint = <&wcd_codec_headset_in>;
+				};
+			};
+		};
+	};
+};
+
+&swr1 {
+	status = "okay";
+
+	wcd_rx: codec@0,4 {
+		compatible = "sdw20217010e00";
+		reg = <0 4>;
+		qcom,rx-port-mapping = <1 2 3 4 5 9>;
+	};
+};
+
+&swr2 {
+	status = "okay";
+
+	wcd_tx: codec@0,3 {
+		compatible = "sdw20217010e00";
+		reg = <0 3>;
+		qcom,tx-port-mapping = <2 2 3 4>;
+	};
+};
+
+/* The firmware has no audio PD and serves APM and PRM on GPR services 3 and 7 */
+&q6apm {
+	reg = <3>;
+	/delete-property/ qcom,protection-domain;
+};
+
+&q6apmbedai {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	dai@10 {
+		reg = <PRIMARY_MI2S_RX>;
+		clocks = <&q6prmcc LPASS_CLK_ID_PRI_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "bclk";
+	};
+};
+
+&q6prm {
+	reg = <7>;
+	/delete-property/ qcom,protection-domain;
+};
+
+&pmih0108_e1_gpios {
+	svooc_btb_therm_default: svooc-btb-therm-default-state {
+		pins = "gpio15";
+		function = "normal";
+		bias-high-impedance;
+	};
+};
+
+&pmk8850_vadc {
+	pinctrl-0 = <&svooc_btb_therm_default>;
+	pinctrl-names = "default";
+
+	channel@144 {
+		reg = <ADC5_GEN4_AMUX1_THM_100K_PU(0, 1)>;
+		label = "skin_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+		qcom,adc-tm;
+	};
+
+	channel@145 {
+		reg = <ADC5_GEN4_AMUX2_THM_100K_PU(0, 1)>;
+		label = "cam_flash_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@146 {
+		reg = <ADC5_GEN4_AMUX3_THM_100K_PU(0, 1)>;
+		label = "wlan_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@147 {
+		reg = <ADC5_GEN4_AMUX4_THM_100K_PU(0, 1)>;
+		label = "pa_therm_1";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@148 {
+		reg = <ADC5_GEN4_AMUX5_THM_100K_PU(0, 1)>;
+		label = "board_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@149 {
+		reg = <ADC5_GEN4_AMUX6_THM_100K_PU(0, 1)>;
+		label = "pa_therm_2";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@14a {
+		reg = <ADC5_GEN4_AMUX1_GPIO_100K_PU(0, 1)>;
+		label = "flash_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@14b {
+		reg = <ADC5_GEN4_AMUX2_GPIO_100K_PU(0, 1)>;
+		label = "qtm_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@2744 {
+		reg = <ADC5_GEN4_AMUX1_THM_100K_PU(1, 7)>;
+		label = "batt_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@2747 {
+		reg = <ADC5_GEN4_AMUX4_THM_100K_PU(1, 7)>;
+		label = "usb_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@274b {
+		reg = <ADC5_GEN4_AMUX2_GPIO_100K_PU(1, 7)>;
+		label = "svooc_mos_btb_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@274c {
+		reg = <ADC5_GEN4_AMUX3_GPIO_100K_PU(1, 7)>;
+		label = "batt_therm_2";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
+
+	channel@274d {
+		reg = <ADC5_GEN4_AMUX4_GPIO_100K_PU(1, 7)>;
+		label = "wls_therm";
+		qcom,ratiometric;
+		qcom,hw-settle-time = <200>;
+	};
 };
