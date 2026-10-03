@@ -342,11 +342,14 @@ static int msm_mdss_reset(struct msm_mdss *msm_mdss)
 		splash = dpu_boot_splash(dev, false);
 		clk_bulk_disable_unprepare(msm_mdss->num_clocks, msm_mdss->clocks);
 
-		/* Keep the splash screen until the KMS takes over */
-		if (splash) {
-			msm_mdss->splash_reset = reset;
-			return 0;
-		}
+		/*
+		 * Cold probe: always idle the MDP here instead of carrying the
+		 * bootloader splash over to the KMS. Handing over a live MDP in
+		 * UEFI scanout makes the first DPU command-DMA modeset stall the
+		 * AXI/NoC (rainbow bands / freeze, then wait_for_idle -110).
+		 */
+		if (splash)
+			dev_info(dev, "bootloader splash active, resetting MDSS anyway\n");
 	}
 
 	reset_control_assert(reset);

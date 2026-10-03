@@ -54,7 +54,15 @@
 #define DPU_DEBUGFS_DIR "msm_dpu"
 #define DPU_DEBUGFS_HWMASKNAME "hw_log_mask"
 
-bool dpu_use_virtual_planes = true;
+/*
+ * Virtual planes make dpu_plane_virtual_assign_resources() split the primary
+ * plane into per-LM rects. On kaanapali with a DSC command-mode panel the
+ * resulting blend setup never reaches a pingpong sync, so the first cmd-DMA
+ * kickoff stalls: _dpu_encoder_phys_cmd_wait_for_idle() returns -110 and
+ * dpu_encoder_frame_done_timeout() repeats forever on a black panel.
+ * Upstream default is true; keep it off for cmd-mode DSI panels.
+ */
+bool dpu_use_virtual_planes = false;
 module_param(dpu_use_virtual_planes, bool, 0);
 
 static int dpu_kms_hw_init(struct msm_kms *kms);
