@@ -183,6 +183,8 @@ struct mipi_dsi_device_info {
  * be set to the real limits of the hardware, zero is only accepted for
  * legacy drivers
  * @dsc: panel/bridge DSC pps payload to be sent
+ * @dsc_slice_per_pkt: number of DSC slices packed into a single DSI packet;
+ *	0 means the driver default of 1 (backwards compatible)
  */
 struct mipi_dsi_device {
 	struct mipi_dsi_host *host;
@@ -197,6 +199,7 @@ struct mipi_dsi_device {
 	unsigned long hs_rate;
 	unsigned long lp_rate;
 	struct drm_dsc_config *dsc;
+	unsigned int dsc_slice_per_pkt;
 };
 
 /**

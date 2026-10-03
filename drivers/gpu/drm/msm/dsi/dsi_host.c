@@ -129,7 +129,7 @@ struct msm_dsi_host {
 	struct clk *dsi_pll_pixel_clk;
 
 	unsigned long byte_clk_rate;
-	bool byte_intf_clk_div_2;
+	unsigned long byte_intf_clk_rate;
 	unsigned long pixel_clk_rate;
 	unsigned long esc_clk_rate;
 
@@ -382,19 +382,7 @@ int msm_dsi_runtime_resume(struct device *dev)
 
 int dsi_link_clk_set_rate_6g(struct msm_dsi_host *msm_host)
 {
-	unsigned long byte_intf_clk_rate;
-	long rounded_byte_clk_rate;
 	int ret;
-
-	rounded_byte_clk_rate = clk_round_rate(msm_host->byte_clk,
-					       msm_host->byte_clk_rate);
-	if (rounded_byte_clk_rate < 0) {
-		pr_err("%s: failed to round byte clock rate, %ld\n",
-		       __func__, rounded_byte_clk_rate);
-		return rounded_byte_clk_rate;
-	}
-
-	msm_host->byte_clk_rate = rounded_byte_clk_rate;
 
 	DBG("Set clk rates: pclk=%lu, byteclk=%lu",
 	    msm_host->pixel_clk_rate, msm_host->byte_clk_rate);
@@ -413,11 +401,7 @@ int dsi_link_clk_set_rate_6g(struct msm_dsi_host *msm_host)
 	}
 
 	if (msm_host->byte_intf_clk) {
-		byte_intf_clk_rate = msm_host->byte_clk_rate;
-		if (msm_host->byte_intf_clk_div_2)
-			byte_intf_clk_rate /= 2;
-
-		ret = clk_set_rate(msm_host->byte_intf_clk, byte_intf_clk_rate);
+		ret = clk_set_rate(msm_host->byte_intf_clk, msm_host->byte_intf_clk_rate);
 		if (ret) {
 			pr_err("%s: Failed to set rate byte intf clk, %d\n",
 			       __func__, ret);
@@ -566,6 +550,8 @@ error:
 
 void dsi_link_clk_disable_6g(struct msm_dsi_host *msm_host)
 {
+	/* Drop the performance state vote */
+	dev_pm_opp_set_rate(&msm_host->pdev->dev, 0);
 	clk_disable_unprepare(msm_host->esc_clk);
 	clk_disable_unprepare(msm_host->pixel_clk);
 	clk_disable_unprepare(msm_host->byte_intf_clk);
@@ -606,6 +592,7 @@ dsi_adjust_pclk_for_compression(const struct drm_display_mode *mode,
 				bool is_bonded_dsi)
 {
 	int hdisplay, new_hdisplay, new_htotal;
+	int bpp_x16 = dsc->bits_per_pixel;	/* 6.4 fixed point */
 
 	/*
 	 * For bonded DSI, split hdisplay across two links and round up each
@@ -617,8 +604,23 @@ dsi_adjust_pclk_for_compression(const struct drm_display_mode *mode,
 	if (is_bonded_dsi)
 		hdisplay /= 2;
 
-	new_hdisplay = DIV_ROUND_UP(hdisplay * drm_dsc_get_bpp_int(dsc),
-				    dsc->bits_per_component * 3);
+	/*
+	 * In native 4:2:2/4:2:0 modes bits_per_pixel carries the DSC-1.2a
+	 * DOUBLED value; the link math needs the ACTUAL bits per pixel.
+	 */
+	if (dsc->native_422 || dsc->native_420)
+		bpp_x16 /= 2;
+
+	/*
+	 * One pclk carries 24 bits of compressed data on the link (3 bytes,
+	 * matching dsi_byte_clk_get_rate()'s RGB888 assumption) -- this is
+	 * INDEPENDENT of bits_per_component. The old divisor (bits_per_component
+	 * * 3) only happened to equal 24 for the 8bpc panels upstream exercises;
+	 * at 10bpc it over-derives the link rate (OP15: 1516.8 vs stock's
+	 * 1112.6 Mbps/lane, 36% over -> DDIC HS receiver never locks -> the panel
+	 * shows its white default). Identical result for 8bpp/8bpc 4:4:4 panels.
+	 */
+	new_hdisplay = DIV_ROUND_UP(hdisplay * bpp_x16, 24 * 16);
 
 	if (is_bonded_dsi)
 		new_hdisplay *= 2;
@@ -953,9 +955,11 @@ static void dsi_update_dsc_timing(struct msm_dsi_host *msm_host, bool is_cmd_mod
 	slice_per_intf = dsc->slice_count;
 
 	total_bytes_per_intf = dsc->slice_chunk_size * slice_per_intf;
+
 	bytes_per_pkt = dsc->slice_chunk_size * msm_host->dsc_slice_per_pkt;
 
 	eol_byte_num = total_bytes_per_intf % 3;
+
 	pkt_per_line = slice_per_intf / msm_host->dsc_slice_per_pkt;
 
 	if (is_cmd_mode) /* packet data type */
@@ -1066,14 +1070,24 @@ static void dsi_timing_setup(struct msm_dsi_host *msm_host, bool is_bonded_dsi)
 		 * unused anyway.
 		 */
 		h_total -= hdisplay;
-		if (wide_bus_enabled) {
-			if (msm_host->mode_flags & MIPI_DSI_MODE_VIDEO)
-				bits_per_pclk = dsc->bits_per_component * 3;
-			else
-				bits_per_pclk = 48;
-		} else {
+
+		if (wide_bus_enabled && !(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO))
+			/*
+			 * CMD-mode + widebus: CMD_MDP_STREAM0_TOTAL.H_TOTAL
+			 * counts 48-bit bus words, so the compressed bytes/line
+			 * divide by 6 (=*8/48), matching downstream
+			 * dsi_ctrl_hw_cmn_setup_cmd_stream()'s widebus path.
+			 * Restores the pre-ac47870fd795 behaviour for CMD mode
+			 * (that commit's video-mode fix stays below); the too-
+			 * large H_TOTAL was starving the MDP pixel FIFO ->
+			 * CMD_MDP_FIFO_UNDERFLOW, so DSC cmd frames never finish.
+			 */
+			bits_per_pclk = 48;
+		else if (wide_bus_enabled)
+			bits_per_pclk = mipi_dsi_pixel_format_to_bpp(msm_host->format);
+		else
 			bits_per_pclk = 24;
-		}
+
 
 		hdisplay = DIV_ROUND_UP(msm_dsc_get_bytes_per_line(msm_host->dsc) * 8, bits_per_pclk);
 
@@ -1110,10 +1124,8 @@ static void dsi_timing_setup(struct msm_dsi_host *msm_host, bool is_bonded_dsi)
 		if (!msm_host->dsc)
 			wc = hdisplay * mipi_dsi_pixel_format_to_bpp(msm_host->format) / 8 + 1;
 		else
-			/*
-			 * When DSC is enabled, WC = slice_chunk_size * slice_per_pkt + 1.
-			 */
-			wc = msm_host->dsc->slice_chunk_size * msm_host->dsc_slice_per_pkt + 1;
+			wc = msm_host->dsc->slice_chunk_size *
+			     msm_host->dsc_slice_per_pkt + 1;
 
 		dsi_write(msm_host, REG_DSI_CMD_MDP_STREAM0_CTRL,
 			DSI_CMD_MDP_STREAM0_CTRL_WORD_COUNT(wc) |
@@ -1724,9 +1736,8 @@ static int dsi_host_attach(struct mipi_dsi_host *host,
 	msm_host->mode_flags = dsi->mode_flags;
 	if (dsi->dsc) {
 		msm_host->dsc = dsi->dsc;
-		if (dsi->mode_flags & MIPI_DSI_MODE_DSC_ALL_SLICES_IN_PKT)
-			msm_host->dsc_slice_per_pkt = dsi->dsc->slice_count;
-		else
+		msm_host->dsc_slice_per_pkt = dsi->dsc_slice_per_pkt;
+		if (!msm_host->dsc_slice_per_pkt)
 			msm_host->dsc_slice_per_pkt = 1;
 	}
 
@@ -1878,6 +1889,8 @@ static int dsi_host_parse_lane_data(struct msm_dsi_host *msm_host,
 static int dsi_populate_dsc_params(struct msm_dsi_host *msm_host, struct drm_dsc_config *dsc)
 {
 	int ret;
+	bool panel_cfg = !!dsc->rc_model_size;
+	enum drm_dsc_params_type type;
 
 	if (dsc->bits_per_pixel & 0xf) {
 		DRM_DEV_ERROR(&msm_host->pdev->dev, "DSI does not support fractional bits_per_pixel\n");
@@ -1901,23 +1914,41 @@ static int dsi_populate_dsc_params(struct msm_dsi_host *msm_host, struct drm_dsc
 		return -EOPNOTSUPP;
 	}
 
+	/*
+	 * A panel driver that fully populated the DSC config (RC table,
+	 * flatness/quant limits, offsets - sentinel: rc_model_size) knows
+	 * the exact PPS its DDIC was qualified against, possibly including
+	 * DSC 1.2 RC parameters or native 4:2:2 sampling. Use it as-is and
+	 * only derive the computed fields. The DPU DSC 1.2 wrapper supports
+	 * these modes (dpu_hw_dsc_1_2.c).
+	 */
+	if (panel_cfg)
+		return drm_dsc_compute_rc_parameters(dsc);
+
 	dsc->simple_422 = 0;
-	dsc->convert_rgb = 1;
+	dsc->convert_rgb = !(dsc->native_422 | dsc->native_420);
 	dsc->vbr_enable = 0;
 
 	drm_dsc_set_const_params(dsc);
 	drm_dsc_set_rc_buf_thresh(dsc);
 
-	if (dsc->dsc_version_minor == 2) {
-		ret = drm_dsc_setup_rc_params(dsc, DRM_DSC_1_2_444);
-		dsc->first_line_bpg_offset = 13;
-	} else {
-		ret = drm_dsc_setup_rc_params(dsc, DRM_DSC_1_1_PRE_SCR);
+	if (dsc->dsc_version_minor == 0x2) {
+		if (dsc->native_422)
+			type = DRM_DSC_1_2_422;
+		else if (dsc->native_420)
+			type = DRM_DSC_1_2_420;
+		else
+			type = DRM_DSC_1_2_444;
 	}
+	else
+		type = DRM_DSC_1_1_PRE_SCR;
+
+	ret = drm_dsc_setup_rc_params(dsc, type);
 	if (ret) {
 		DRM_DEV_ERROR(&msm_host->pdev->dev, "could not find DSC RC parameters\n");
 		return ret;
 	}
+	dsc->first_line_bpg_offset = 13;
 
 	dsc->initial_scale_value = drm_dsc_initial_scale_value(dsc);
 	dsc->line_buf_depth = dsc->bits_per_component + 1;
@@ -2503,7 +2534,9 @@ int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 		goto unlock_ret;
 	}
 
-	msm_host->byte_intf_clk_div_2 = phy_shared_timings->byte_intf_clk_div_2;
+	msm_host->byte_intf_clk_rate = msm_host->byte_clk_rate;
+	if (phy_shared_timings->byte_intf_clk_div_2)
+		msm_host->byte_intf_clk_rate /= 2;
 
 	msm_dsi_sfpb_config(msm_host, true);
 

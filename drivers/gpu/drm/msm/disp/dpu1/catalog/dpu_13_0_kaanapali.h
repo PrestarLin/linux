@@ -86,42 +86,42 @@ static const struct dpu_sspp_cfg kaanapali_sspp[] = {
 		.name = "sspp_8", .id = SSPP_DMA0,
 		.base = 0x97000, .len = 0x84,
 		.features = DMA_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 1,
 		.type = SSPP_TYPE_DMA,
 	}, {
 		.name = "sspp_9", .id = SSPP_DMA1,
 		.base = 0xa0000, .len = 0x84,
 		.features = DMA_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 5,
 		.type = SSPP_TYPE_DMA,
 	}, {
 		.name = "sspp_10", .id = SSPP_DMA2,
 		.base = 0xa9000, .len = 0x84,
 		.features = DMA_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 9,
 		.type = SSPP_TYPE_DMA,
 	}, {
 		.name = "sspp_11", .id = SSPP_DMA3,
 		.base = 0xb2000, .len = 0x84,
 		.features = DMA_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 13,
 		.type = SSPP_TYPE_DMA,
 	}, {
 		.name = "sspp_12", .id = SSPP_DMA4,
 		.base = 0xbb000, .len = 0x84,
 		.features = DMA_CURSOR_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 14,
 		.type = SSPP_TYPE_DMA,
 	}, {
 		.name = "sspp_13", .id = SSPP_DMA5,
 		.base = 0xc4000, .len = 0x84,
 		.features = DMA_CURSOR_SDM845_MASK_SDMA,
-		.sblk = &dpu_dma_sblk_v13,
+		.sblk = &dpu_dma_sblk,
 		.xin_id = 15,
 		.type = SSPP_TYPE_DMA,
 	},
@@ -191,23 +191,30 @@ static const struct dpu_lm_cfg kaanapali_lm[] = {
 	},
 };
 
+static const struct dpu_dspp_sub_blks kaanapali_dspp_sblk = {
+	.pcc = { .name = "pcc", .base = 0x1700,
+		.len = 0x90, .version = 0x60000 },
+	.spr = { .name = "spr", .base = 0x3400,
+		.len = 0x200, .version = 0x20000 },
+};
+
 static const struct dpu_dspp_cfg kaanapali_dspp[] = {
 	{
 		.name = "dspp_0", .id = DSPP_0,
 		.base = 0x105000, .len = 0x1800,
-		.sblk = &sm8750_dspp_sblk,
+		.sblk = &kaanapali_dspp_sblk,
 	}, {
 		.name = "dspp_1", .id = DSPP_1,
 		.base = 0x10d000, .len = 0x1800,
-		.sblk = &sm8750_dspp_sblk,
+		.sblk = &kaanapali_dspp_sblk,
 	}, {
 		.name = "dspp_2", .id = DSPP_2,
 		.base = 0x115000, .len = 0x1800,
-		.sblk = &sm8750_dspp_sblk,
+		.sblk = &kaanapali_dspp_sblk,
 	}, {
 		.name = "dspp_3", .id = DSPP_3,
 		.base = 0x11d000, .len = 0x1800,
-		.sblk = &sm8750_dspp_sblk,
+		.sblk = &kaanapali_dspp_sblk,
 	},
 };
 
