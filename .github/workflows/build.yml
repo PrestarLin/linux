@@ -63,6 +63,25 @@ jobs:
           path: build.log
           if-no-files-found: ignore
 
+      # Artifact download and job logs both need auth for this account.
+      # Mirror build.log to a public branch so the raw URL is readable:
+      #   https://raw.githubusercontent.com/PrestarLin/linux/ci-log/build.log
+      - name: Push build log to ci-log branch
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -s build.log || exit 0
+          mkdir -p /tmp/ci-log && cd /tmp/ci-log
+          git init -q -b ci-log
+          cp "$GITHUB_WORKSPACE/build.log" .
+          git config user.email 75038146@qq.com
+          git config user.name ci-log
+          git add -f build.log
+          git commit -qm "run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
+          git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-log --force
+          echo "log mirrored to ci-log branch"
+
       - name: Bake stock memory map into dtb
         run: |
           # Upstream dts ships memory@a0000000 with size 0 (expects the
