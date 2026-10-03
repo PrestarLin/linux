@@ -76,6 +76,16 @@
 		#size-cells = <2>;
 		ranges;
 
+		/*
+		 * Keep this node minimal, matching the proven 7.2 common.dts
+		 * (cold-probe) form: NO clocks, NO power-domains, NO
+		 * memory-region. simple-framebuffer with the MDSS clk/GDSC/MMCX
+		 * list enabled the live UEFI-scanout pipeline before msm_mdss
+		 * cold-probes it (qcom,skip-mdss-reset is intentionally unset),
+		 * which wedges the MDP/NoC path: DCS reads still answer but every
+		 * DPU command-DMA kickoff times out (-110) and the panel never
+		 * scans (see 7.2 common.dts display bring-up comment).
+		 */
 		framebuffer: framebuffer@fc800000 {
 			compatible = "simple-framebuffer";
 			reg = <0x0 0xfc800000 0x0 0x2b00000>;
@@ -83,22 +93,6 @@
 			height = <2772>;
 			stride = <(1272 * 4)>;
 			format = "a8r8g8b8";
-
-			clocks = <&gcc GCC_DISP_HF_AXI_CLK>,
-				 <&dispcc DISP_CC_MDSS_AHB_CLK>,
-				 <&dispcc DISP_CC_MDSS_MDP_CLK>,
-				 <&dispcc DISP_CC_MDSS_MDP_LUT_CLK>,
-				 <&dispcc DISP_CC_MDSS_VSYNC_CLK>,
-				 <&dispcc DISP_CC_MDSS_BYTE0_CLK>,
-				 <&dispcc DISP_CC_MDSS_BYTE0_INTF_CLK>,
-				 <&dispcc DISP_CC_MDSS_PCLK0_CLK>,
-				 <&dispcc DISP_CC_MDSS_ESC0_CLK>;
-
-			power-domains = <&rpmhpd RPMHPD_MMCX>,
-					<&dispcc DISP_CC_MDSS_CORE_GDSC>;
-			required-opps = <&rpmhpd_opp_svs>;
-
-			memory-region = <&cont_splash_mem>;
 		};
 	};
 
