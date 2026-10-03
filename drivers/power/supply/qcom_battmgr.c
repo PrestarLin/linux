@@ -82,6 +82,16 @@
 #define BATT_OPLUS_ADSP_GAUGE_INIT             38
 #define BATT_OPLUS_UPDATE_SOC_SMOOTH_PARAM     39
 
+/*
+ * OnePlus' battery property namespace on the SoCCP battery manager, not its
+ * custom 0x0300 namespace: opcode 0x301 with property 68 (OPLUS_BATT_CAPACITY)
+ * returns the pack SOC in centipercent.
+ */
+#define BATTMGR_OPLUS_PROPERTY_GET	0x301
+#define OPLUS_BATT_CAPACITY		68
+
+#define BATTMGR_ONEPLUS_GAUGE_TIMEOUT_MS	2500
+
 #define BATTMGR_USB_PROPERTY_GET	0x32
 #define BATTMGR_USB_PROPERTY_SET	0x33
 
@@ -295,10 +305,14 @@ struct qcom_battmgr_oem_read_resp {
 #define BATTMGR_CHARGING_SOURCE_USB	2
 #define BATTMGR_CHARGING_SOURCE_WIRELESS 3
 
-int qcom_battmgr_request(struct qcom_battmgr *battmgr, void *data, size_t len)
+static int qcom_battmgr_request_timeout(struct qcom_battmgr *battmgr, void *data,
+					size_t len, unsigned long timeout)
 {
 	unsigned long left;
 	int ret;
+
+	if (READ_ONCE(battmgr->removing))
+		return -ENODEV;
 
 	reinit_completion(&battmgr->ack);
 
@@ -308,15 +322,21 @@ int qcom_battmgr_request(struct qcom_battmgr *battmgr, void *data, size_t len)
 	if (ret < 0)
 		return ret;
 
-	left = wait_for_completion_timeout(&battmgr->ack, HZ);
+	left = wait_for_completion_timeout(&battmgr->ack, timeout);
 	if (!left)
 		return -ETIMEDOUT;
 
 	return battmgr->error;
 }
 
-int qcom_battmgr_request_property(struct qcom_battmgr *battmgr, int opcode,
-					 int property, u32 value)
+int qcom_battmgr_request(struct qcom_battmgr *battmgr, void *data, size_t len)
+{
+	return qcom_battmgr_request_timeout(battmgr, data, len, HZ);
+}
+
+static int qcom_battmgr_request_property_timeout(struct qcom_battmgr *battmgr,
+						 int opcode, int property, u32 value,
+						 unsigned long timeout)
 {
 	struct qcom_battmgr_property_request request = {
 		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
@@ -327,7 +347,13 @@ int qcom_battmgr_request_property(struct qcom_battmgr *battmgr, int opcode,
 		.value = cpu_to_le32(value),
 	};
 
-	return qcom_battmgr_request(battmgr, &request, sizeof(request));
+	return qcom_battmgr_request_timeout(battmgr, &request, sizeof(request), timeout);
+}
+
+int qcom_battmgr_request_property(struct qcom_battmgr *battmgr, int opcode,
+					 int property, u32 value)
+{
+	return qcom_battmgr_request_property_timeout(battmgr, opcode, property, value, HZ);
 }
 
 int qcom_battmgr_update_status(struct qcom_battmgr *battmgr)
@@ -427,16 +453,35 @@ static void qcom_battmgr_apply_oem_data(struct qcom_battmgr *battmgr)
 static int qcom_battmgr_bat_sm8350_update(struct qcom_battmgr *battmgr,
 					  enum power_supply_property psp)
 {
+	unsigned int opcode;
 	unsigned int prop;
 	int ret;
 
 	if (psp >= ARRAY_SIZE(sm8350_bat_prop_map))
 		return -EINVAL;
 
-	prop = sm8350_bat_prop_map[psp];
+	/*
+	 * The OnePlus 15 SoCCP battery manager does not report the real pack
+	 * SOC through the standard BATT_CAPACITY property; the stock stack
+	 * reads it from the OnePlus property namespace (opcode 0x301,
+	 * property 68) once the fuel gauge has been initialized. Switch to
+	 * that path only after a post-init read succeeded in the current PDR
+	 * generation; otherwise keep the standard request so a firmware
+	 * without the OnePlus namespace still yields a capacity reading
+	 * instead of no capacity at all.
+	 */
+	if (battmgr->oneplus_gauge_init && psp == POWER_SUPPLY_PROP_CAPACITY &&
+	    READ_ONCE(battmgr->gauge_initialized_generation) ==
+	    READ_ONCE(battmgr->pdr_generation)) {
+		opcode = BATTMGR_OPLUS_PROPERTY_GET;
+		prop = OPLUS_BATT_CAPACITY;
+	} else {
+		opcode = BATTMGR_BAT_PROPERTY_GET;
+		prop = sm8350_bat_prop_map[psp];
+	}
 
 	mutex_lock(&battmgr->lock);
-	ret = qcom_battmgr_request_property(battmgr, BATTMGR_BAT_PROPERTY_GET, prop, 0);
+	ret = qcom_battmgr_request_property(battmgr, opcode, prop, 0);
 	mutex_unlock(&battmgr->lock);
 
         /* Try OEM read buffer and override with real fuel gauge data */
@@ -1840,6 +1885,32 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
                         le32_to_cpu(resp->intval.result));
                 battmgr->error = le32_to_cpu(resp->intval.result);
                 break;
+	case BATTMGR_OPLUS_PROPERTY_GET:
+		if (payload_len != sizeof(resp->intval)) {
+			dev_warn(battmgr->dev,
+				 "invalid payload length for OnePlus property request: %zd\n",
+				 payload_len);
+			battmgr->error = -ENODATA;
+			break;
+		}
+
+		battmgr->error = le32_to_cpu(resp->intval.result);
+		if (battmgr->error)
+			break;
+
+		property = le32_to_cpu(resp->intval.property);
+		if (property != OPLUS_BATT_CAPACITY) {
+			dev_warn(battmgr->dev,
+				 "unexpected OnePlus property response: %#x\n",
+				 property);
+			battmgr->error = -ENODATA;
+			break;
+		}
+
+		val = le32_to_cpu(resp->intval.value);
+		battmgr->oneplus_capacity_raw = val;
+		battmgr->status.percent = DIV_ROUND_CLOSEST(val, 100);
+		break;
 	default:
 		dev_warn(battmgr->dev, "unknown message %#x\n", opcode);
 		break;
@@ -2385,8 +2456,9 @@ static void qcom_battmgr_voocphy_recheck(struct work_struct *work)
         }
 
 reschedule:
-        schedule_delayed_work(&battmgr->voocphy_recheck_work,
-                              msecs_to_jiffies(5000));
+        if (!READ_ONCE(battmgr->removing))
+                schedule_delayed_work(&battmgr->voocphy_recheck_work,
+                                      msecs_to_jiffies(5000));
 }
 
 
@@ -2398,7 +2470,15 @@ void qcom_battmgr_enable_worker(struct work_struct *work)
 		.hdr.type = cpu_to_le32(PMIC_GLINK_NOTIFY),
 		.hdr.opcode = cpu_to_le32(BATTMGR_REQUEST_NOTIFICATION),
 	};
+	unsigned long gauge_timeout = msecs_to_jiffies(BATTMGR_ONEPLUS_GAUGE_TIMEOUT_MS);
+	unsigned int generation = READ_ONCE(battmgr->pdr_generation);
+	unsigned int gauge_capacity_raw = 0;
+	bool gauge_ready = false;
+	int gauge_ret;
 	int ret;
+
+	if (READ_ONCE(battmgr->removing))
+		return;
 
 	ret = qcom_battmgr_request(battmgr, &req, sizeof(req));
         if (ret) {
@@ -2413,12 +2493,56 @@ void qcom_battmgr_enable_worker(struct work_struct *work)
          * pmic_glink_register_client().
          */
         qcom_battmgr_oplus_gauge_init(battmgr);
+
+	if (battmgr->oneplus_gauge_init) {
+		/*
+		 * With soccp_support, the stock driver reads SOC from OnePlus
+		 * opcode 0x0301, property 68. A successful GET is the
+		 * protocol/read barrier; its value may legitimately be zero and
+		 * is never synthesized here.
+		 */
+		mutex_lock(&battmgr->lock);
+		gauge_ret = qcom_battmgr_request_property_timeout(battmgr,
+								  BATTMGR_OPLUS_PROPERTY_GET,
+								  OPLUS_BATT_CAPACITY, 0,
+								  gauge_timeout);
+		mutex_unlock(&battmgr->lock);
+
+		if (gauge_ret) {
+			dev_err(battmgr->dev,
+				"failed post-init OnePlus fuel-gauge capacity read: %d\n",
+				gauge_ret);
+		} else if (battmgr->service_up &&
+			   generation == READ_ONCE(battmgr->pdr_generation)) {
+			WRITE_ONCE(battmgr->gauge_initialized_generation,
+				   generation);
+			gauge_capacity_raw = battmgr->oneplus_capacity_raw;
+			gauge_ready = true;
+		}
+	}
+
+	if (gauge_ready) {
+		dev_info(battmgr->dev,
+			 "OnePlus fuel-gauge capacity read enabled: raw SOC %u centipercent (%u%%)\n",
+			 gauge_capacity_raw,
+			 DIV_ROUND_CLOSEST(gauge_capacity_raw, 100));
+		power_supply_changed(battmgr->bat_psy);
+	}
+
 	schedule_delayed_work(&battmgr->otg_init_work, round_jiffies_relative(msecs_to_jiffies(3500)));
 }
 
 void qcom_battmgr_pdr_notify(void *priv, int state)
 {
 	struct qcom_battmgr *battmgr = priv;
+	unsigned int generation;
+
+	if (READ_ONCE(battmgr->removing))
+		return;
+
+	generation = READ_ONCE(battmgr->pdr_generation) + 1;
+
+	WRITE_ONCE(battmgr->pdr_generation, generation);
 
 	if (state == SERVREG_SERVICE_STATE_UP) {
 		battmgr->service_up = true;
@@ -2440,6 +2564,17 @@ static const struct of_device_id qcom_battmgr_of_variants[] = {
 };
 
 static char *qcom_battmgr_battery[] = { "battery" };
+
+static void qcom_battmgr_cancel_work(void *data)
+{
+	struct qcom_battmgr *battmgr = data;
+
+	cancel_work_sync(&battmgr->enable_work);
+	cancel_delayed_work_sync(&battmgr->otg_init_work);
+	cancel_delayed_work_sync(&battmgr->voocphy_recheck_work);
+	cancel_work_sync(&battmgr->voocphy_status_work);
+	cancel_work_sync(&battmgr->chg_status_reply_work);
+}
 
 static void oplus_otg_init_status_func(struct work_struct *work)
 {
@@ -2475,6 +2610,7 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 		return -ENOMEM;
 
 	battmgr->dev = dev;
+	auxiliary_set_drvdata(adev, battmgr);
 
 	psy_cfg.drv_data = battmgr;
 	psy_cfg.fwnode = dev_fwnode(&adev->dev);
@@ -2506,6 +2642,7 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 		battmgr->variant = (unsigned long)match->data;
 	else
 		battmgr->variant = QCOM_BATTMGR_SM8350;
+	battmgr->oneplus_gauge_init = of_machine_is_compatible("oneplus,infiniti");
 
 	ret = qcom_battmgr_charge_control_thresholds_init(battmgr);
 	if (ret < 0)
@@ -2560,6 +2697,15 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 					     "failed to register wireless charing power supply\n");
 	}
 
+	/*
+	 * Register this before allocating the client. Reverse devres ordering
+	 * removes the callback source before the final work cancellation, which
+	 * catches work queued by a callback that raced the remove-time drain.
+	 */
+	ret = devm_add_action_or_reset(dev, qcom_battmgr_cancel_work, battmgr);
+	if (ret)
+		return ret;
+
 	battmgr->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_BATTMGR,
 						       qcom_battmgr_callback,
 						       qcom_battmgr_pdr_notify,
@@ -2572,6 +2718,20 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 	return 0;
 }
 
+static void qcom_battmgr_remove(struct auxiliary_device *adev)
+{
+	struct qcom_battmgr *battmgr = auxiliary_get_drvdata(adev);
+
+	/* Keep the GLINK client alive until all client-using work has stopped. */
+	WRITE_ONCE(battmgr->removing, true);
+	WRITE_ONCE(battmgr->service_up, false);
+	cancel_work_sync(&battmgr->enable_work);
+
+	/* Drain property requests which passed their pre-remove service check. */
+	mutex_lock(&battmgr->lock);
+	mutex_unlock(&battmgr->lock);
+}
+
 static const struct auxiliary_device_id qcom_battmgr_id_table[] = {
 	{ .name = "pmic_glink.power-supply", },
 	{},
@@ -2581,6 +2741,7 @@ MODULE_DEVICE_TABLE(auxiliary, qcom_battmgr_id_table);
 static struct auxiliary_driver qcom_battmgr_driver = {
 	.name = "pmic_glink_power_supply",
 	.probe = qcom_battmgr_probe,
+	.remove = qcom_battmgr_remove,
 	.id_table = qcom_battmgr_id_table,
 };
 

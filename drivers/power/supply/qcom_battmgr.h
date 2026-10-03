@@ -206,6 +206,11 @@ struct qcom_battmgr {
 	struct completion ack;
 
 	bool service_up;
+	bool removing;
+	bool oneplus_gauge_init;
+	unsigned int oneplus_capacity_raw;
+	unsigned int pdr_generation;
+	unsigned int gauge_initialized_generation;
 
 	struct qcom_battmgr_info info;
 	struct qcom_battmgr_status status;
