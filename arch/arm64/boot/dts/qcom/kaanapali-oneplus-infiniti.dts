@@ -234,6 +234,14 @@
 		regulator-name = "panel_vddr";
 		gpio = <&pmh0101_gpios 4 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
+		/*
+		 * VDDR_SM_1P5_EN feeds the panel power IC. No driver consumes
+		 * vddr-supply, so regulator_late_cleanup() (which exempts only
+		 * always_on, not boot_on) would drop the rail the firmware left
+		 * up: the DDIC answers DCS reads but never scans, and every DPU
+		 * command-DMA kickoff times out (-110) on a black panel.
+		 */
+		regulator-always-on;
 		regulator-boot-on;
 		pinctrl-0 = <&panel_vddr_en_active>;
 		pinctrl-names = "default";
@@ -466,6 +474,10 @@
 			regulator-min-microvolt = <3200000>;
 			regulator-max-microvolt = <3200000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			/* Fingerprint is powered from here but its SPI bus stays
+			 * in TrustZone, so no Linux driver can claim this rail;
+			 * regulator_late_cleanup() would otherwise drop it. */
+			regulator-always-on;
 			regulator-boot-on;
 		};
 
