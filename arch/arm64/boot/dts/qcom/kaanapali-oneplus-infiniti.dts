@@ -1782,6 +1782,13 @@
 		vddrfa1p8-supply = <&vreg_pmu_rfa_1p8>;
 
 		max-speed = <3200000>;
+
+		/* Factory address, byte-reversed. Without it qca_check_bdaddr()
+		 * matches the controller against the address baked into the NVM,
+		 * sets HCI_QUIRK_USE_BDADDR_PROPERTY and leaves hci0 unconfigured:
+		 * hciconfig up -> EOPNOTSUPP, and mgmt never publishes an index.
+		 */
+		local-bd-address = [ad 5a 01 00 55 78];
 	};
 };
 
