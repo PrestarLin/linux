@@ -28,9 +28,14 @@ jobs:
       - name: Configure
         run: |
           make ARCH=arm64 defconfig
-          ./scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/kaanapali.config
+          # kaanapali.config = upstream stub; oneplus15-cn.config = PRIMARY
+          # fragment (merged last, wins on conflicts): boot chain =y,
+          # desktop peripherals =m -> shipped to rootfs via modules_install.
+          ./scripts/kconfig/merge_config.sh -m .config \
+            arch/arm64/configs/kaanapali.config \
+            arch/arm64/configs/oneplus15-cn.config
           make ARCH=arm64 olddefconfig
-          grep -E '^CONFIG_DRM_MSM=y|^CONFIG_SCSI_UFS_QCOM=y|^CONFIG_USB_CONFIGFS=y' .config
+          grep -E '^CONFIG_DRM_MSM=y|^CONFIG_SCSI_UFS_QCOM=y|^CONFIG_USB_CONFIGFS=y|^CONFIG_DRM_PANEL_ONEPLUS15_A0020=y|^CONFIG_QCOM_CPUCP_MBOX=y|^CONFIG_PHY_QCOM_EUSB2_REPEATER=y' .config
 
       - name: Build
         run: make ARCH=arm64 -j"$(nproc)" Image dtbs
@@ -91,7 +96,9 @@ jobs:
           body: |
             Rolling in-tree build of PrestarLin/linux branch `oneplus15-mainline`
             (based on infiniti-mainline/linux master 834ddc00f), configured with
-            arch/arm64/configs/kaanapali.config.
+            arch/arm64/configs/oneplus15-cn.config (primary; merged after the
+            upstream kaanapali.config stub). Boot chain =y, desktop
+            peripherals =m (modules land in rootfs via modules_install).
             CI source tree: ${{ github.repository }}@${{ github.sha }}.
           files: |
             kaanapali-mainline-build.tar.gz
