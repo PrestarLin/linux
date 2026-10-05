@@ -137,8 +137,19 @@
 	gpio-keys {
 		compatible = "gpio-keys";
 
-		pinctrl-0 = <&key_vol_down_default>, <&key_plus_default>;
+		pinctrl-0 = <&key_vol_down_default>, <&key_plus_default>,
+			    <&hall_default>;
 		pinctrl-names = "default";
+
+		event-hall-sensor {
+			label = "Hall Effect Sensor";
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			gpios = <&tlmm 98 GPIO_ACTIVE_LOW>;
+			debounce-interval = <32>;
+			linux,can-disable;
+			wakeup-source;
+		};
 
 		key-plus {
 			label = "Plus Key";
@@ -446,6 +457,15 @@
 			regulator-allow-set-load;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 						   RPMH_REGULATOR_MODE_AUTO>;
+		};
+
+		/* Only supplies the hall sensor */
+		vreg_l1b_1p8: ldo1 {
+			regulator-name = "vreg_l1b_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
 		};
 
 		vreg_l4b_1p8: ldo4 {
@@ -891,6 +911,15 @@
 	status = "disabled";
 };
 
+/* Cluster and system idle states hang the SoC after hours idle, as on X1 */
+&cluster0_pd {
+	/delete-property/ domain-idle-states;
+};
+
+&cluster1_pd {
+	/delete-property/ domain-idle-states;
+};
+
 &csiphy1 {
 	vdda-0p9-supply = <&vreg_l3i_0p8>;
 	vdda-1p2-supply = <&vreg_l1d_1p2>;
@@ -1130,6 +1159,12 @@
 	};
 };
 
+&ipa {
+	firmware-name = "qcom/kaanapali/OnePlus/Infiniti/ipa_fws.mbn";
+
+	status = "okay";
+};
+
 &iris {
 	firmware-name = "qcom/kaanapali/OnePlus/Infiniti/vpu40_2v.mbn";
 
@@ -1362,6 +1397,17 @@
 };
 
 &pmih0108_e1_gpios {
+	pinctrl-0 = <&esim_en_default>;
+	pinctrl-names = "default";
+
+	esim_en_default: esim-en-default-state {
+		pins = "gpio10";
+		function = "normal";
+		power-source = <1>;
+		bias-disable;
+		output-high;
+	};
+
 	svooc_btb_therm_default: svooc-btb-therm-default-state {
 		pins = "gpio15";
 		function = "normal";
@@ -1521,6 +1567,21 @@
 			"qcom/kaanapali/OnePlus/Infiniti/soccp_dtb.mbn";
 };
 
+&spi16 {
+	/* The IR LED hangs off MOSI; the other SPI pins are used elsewhere */
+	pinctrl-0 = <&ir_spi_mosi>;
+
+	status = "okay";
+
+	irled@0 {
+		compatible = "ir-spi-led";
+		reg = <0>;
+		spi-max-frequency = <5000000>;
+		duty-cycle = /bits/ 8 <50>;
+		/* Its supply, L9B, is held by the fingerprint supply output */
+	};
+};
+
 &spi19 {
 	status = "okay";
 
@@ -1560,6 +1621,10 @@
 		reg = <0 3>;
 		qcom,tx-port-mapping = <2 2 3 4>;
 	};
+};
+
+&system_pd {
+	/delete-property/ domain-idle-states;
 };
 
 &tlmm {
@@ -1665,12 +1730,27 @@
 		bias-disable;
 	};
 
+	ir_spi_mosi: ir-spi-mosi-state {
+		pins = "gpio17";
+		function = "qup3_se3";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
 	key_plus_default: key-plus-default-state {
 		pins = "gpio97";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
+
+	hall_default: hall-default-state {
+		pins = "gpio98";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	nfc_default: nfc-default-state {
 		int-pins {
 			pins = "gpio75";

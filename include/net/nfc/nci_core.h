@@ -204,6 +204,9 @@ struct nci_dev {
 	atomic_t		state;
 	unsigned long		flags;
 
+	/* Keep the NFCC configuration across CORE_RESET */
+	bool			keep_config;
+
 	atomic_t		cmd_cnt;
 	__u8			cur_conn_id;
 

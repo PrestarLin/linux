@@ -5,6 +5,7 @@
  */
 
 #include <linux/qrtr.h>
+#include <linux/sizes.h>
 #include <linux/string.h>
 #include <linux/types.h>
 
@@ -229,7 +230,83 @@ static void ipa_server_driver_init_complete(struct qmi_handle *qmi,
 	}
 }
 
-/* The server handles two request message types sent by the modem. */
+/* Respond to a FILTER_INSTALLED_NOTIF request message from the modem. */
+static void ipa_server_filter_installed_notif(struct qmi_handle *qmi,
+					      struct sockaddr_qrtr *sq,
+					      struct qmi_txn *txn,
+					      const void *decoded)
+{
+	struct ipa_qmi_generic_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_FILTER_INSTALLED_NOTIF,
+				IPA_QMI_FILTER_INSTALLED_NOTIF_RSP_SZ,
+				ipa_qmi_generic_rsp_ei, &rsp);
+	if (ret)
+		dev_err(ipa->dev,
+			"error %d sending filter installed response\n", ret);
+}
+
+/* Respond to an INSTALL_FILTER_RULE request message from the modem.  The
+ * rules are only needed for offload paths this driver doesn't implement.
+ */
+static void ipa_server_install_filter_rule(struct qmi_handle *qmi,
+					   struct sockaddr_qrtr *sq,
+					   struct qmi_txn *txn,
+					   const void *decoded)
+{
+	struct ipa_qmi_generic_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_INSTALL_FILTER_RULE,
+				IPA_QMI_INSTALL_FILTER_RULE_RSP_SZ,
+				ipa_qmi_generic_rsp_ei, &rsp);
+	if (ret)
+		dev_err(ipa->dev,
+			"error %d sending install filter rule response\n", ret);
+}
+
+/* Respond to a CONFIG request message from the modem. */
+static void ipa_server_config(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
+			      struct qmi_txn *txn, const void *decoded)
+{
+	struct ipa_qmi_generic_rsp rsp = { };
+	struct ipa_qmi *ipa_qmi;
+	struct ipa *ipa;
+	int ret;
+
+	ipa_qmi = container_of(qmi, struct ipa_qmi, server_handle);
+	ipa = container_of(ipa_qmi, struct ipa, qmi);
+
+	rsp.rsp.result = QMI_RESULT_SUCCESS_V01;
+	rsp.rsp.error = QMI_ERR_NONE_V01;
+
+	ret = qmi_send_response(qmi, sq, txn, IPA_QMI_CONFIG,
+				IPA_QMI_CONFIG_RSP_SZ, ipa_qmi_generic_rsp_ei,
+				&rsp);
+	if (ret)
+		dev_err(ipa->dev, "error %d sending config response\n", ret);
+}
+
+/* The server handles these request message types sent by the modem, which
+ * waits for a response to each.
+ */
 static const struct qmi_msg_handler ipa_server_msg_handlers[] = {
 	{
 		.type		= QMI_REQUEST,
@@ -244,6 +321,27 @@ static const struct qmi_msg_handler ipa_server_msg_handlers[] = {
 		.ei		= ipa_driver_init_complete_req_ei,
 		.decoded_size	= IPA_QMI_DRIVER_INIT_COMPLETE_REQ_SZ,
 		.fn		= ipa_server_driver_init_complete,
+	},
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_INSTALL_FILTER_RULE,
+		.ei		= ipa_qmi_ignored_req_ei,
+		.decoded_size	= sizeof(struct ipa_qmi_ignored_req),
+		.fn		= ipa_server_install_filter_rule,
+	},
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_FILTER_INSTALLED_NOTIF,
+		.ei		= ipa_qmi_ignored_req_ei,
+		.decoded_size	= sizeof(struct ipa_qmi_ignored_req),
+		.fn		= ipa_server_filter_installed_notif,
+	},
+	{
+		.type		= QMI_REQUEST,
+		.msg_id		= IPA_QMI_CONFIG,
+		.ei		= ipa_qmi_ignored_req_ei,
+		.decoded_size	= sizeof(struct ipa_qmi_ignored_req),
+		.fn		= ipa_server_config,
 	},
 	{ },
 };
@@ -392,6 +490,30 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 			req.hw_stats_drop_size_valid = 1;
 			req.hw_stats_drop_size = ipa->mem_offset + mem->size;
 		}
+	}
+
+	if (ipa->version >= IPA_VERSION_4_5 && ipa->fnr_idx_cnt) {
+		mem = ipa_mem_find(ipa, IPA_MEM_STATS_FILTER_ROUTE);
+		if (mem && mem->size) {
+			req.hw_stats_filter_info_valid = 1;
+			req.hw_stats_filter_info.start_addr =
+				ipa->mem_offset + mem->offset;
+			req.hw_stats_filter_info.size =
+				ipa->fnr_idx_cnt * 16;
+			req.hw_stats_filter_info.start_index =
+				ipa->fnr_idx_start;
+			req.hw_stats_filter_info.end_index =
+				ipa->fnr_idx_start + ipa->fnr_idx_cnt - 1;
+		}
+	}
+
+	if (ipa->version >= IPA_VERSION_5_5 && ipa->smem_item_size) {
+		req.smem_info_valid = 1;
+		req.smem_info.size = ipa->smem_item_size;
+		/* The first 2 KiB hold the peripheral statistics */
+		req.per_stats_smem_info_valid = 1;
+		req.per_stats_smem_info.start = ipa->smem_addr;
+		req.per_stats_smem_info.size = SZ_2K;
 	}
 
 	return &req;

@@ -96,8 +96,7 @@ struct dsi_pll_7nm {
 	 */
 	spinlock_t pll_enable_lock;
 	int pll_enable_cnt;
-
-		bool vco_configured;
+	bool vco_configured;
 
 	struct pll_7nm_cached_state cached_state;
 

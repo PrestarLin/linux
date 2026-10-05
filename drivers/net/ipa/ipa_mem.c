@@ -21,6 +21,9 @@
 #include "ipa_reg.h"
 #include "ipa_table.h"
 
+/* First uC descriptor RAM word the vendor driver leaves on IPA v5.5+ */
+#define IPA_UC_DESC_MAGIC	0xabcdef01
+
 /* "Canary" value placed between memory regions to detect overflow */
 #define IPA_MEM_CANARY_VAL		cpu_to_le32(0xdeadbeef)
 
@@ -84,6 +87,15 @@ int ipa_mem_setup(struct ipa *ipa)
 	u32 offset;
 	u16 size;
 	u32 val;
+
+	/* IPA-local memory powers up with random contents.  The modem only
+	 * starts the microcontroller properly if the first word of its
+	 * descriptor RAM holds what the vendor driver leaves there.
+	 */
+	mem = ipa_mem_find(ipa, IPA_MEM_UC_EVENT_RING);
+	if (mem)
+		iowrite32(ipa->version >= IPA_VERSION_5_5 ? IPA_UC_DESC_MAGIC : 0,
+			  ipa->mem_virt + ipa->mem_offset + mem->offset);
 
 	/* Get a transaction to define the header memory region and to zero
 	 * the processing context and modem memory regions.
@@ -588,6 +600,8 @@ static int ipa_smem_init(struct ipa *ipa, size_t size)
 
 	ipa->smem_iova = iova;
 	ipa->smem_size = size;
+	ipa->smem_addr = addr;
+	ipa->smem_item_size = actual;
 
 	return 0;
 }
@@ -630,6 +644,9 @@ int ipa_mem_init(struct ipa *ipa, struct platform_device *pdev,
 
 	ipa->mem_count = mem_data->local_count;
 	ipa->mem = mem_data->local;
+
+	ipa->fnr_idx_start = mem_data->fnr_idx_start ? : 128;
+	ipa->fnr_idx_cnt = mem_data->fnr_idx_cnt;
 
 	/* Check the route and filter table memory regions */
 	if (!ipa_table_mem_valid(ipa, false))
